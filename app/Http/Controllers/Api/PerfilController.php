@@ -7,35 +7,65 @@ use App\Models\Perfil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
+use Carbon\Carbon;
 
 class PerfilController extends Controller
 {
     /**
-     * Obtener todos los perfiles con información adicional
+     * Display a listing of the resource.
      */
     public function index(Request $request)
     {
         try {
-            $search = $request->get('search', '');
             $perPage = $request->get('per_page', 15);
+            $search = $request->get('search', '');
+            $activo = $request->get('activo', '');
+            $nivel = $request->get('nivel', '');
 
-            $query = DB::table('tbl_per')
-                ->select(
-                    'tbl_per.per_id',
-                    'tbl_per.per_nom',
-                    DB::raw('COUNT(DISTINCT tbl_usu.usu_id) as usuarios_count'),
-                    DB::raw('COUNT(DISTINCT tbl_perm.perm_id) as permisos_count')
+            $query = DB::table('tbl_per as p')
+                ->leftJoin(
+                    DB::raw('(SELECT per_id, COUNT(*) as total_usuarios FROM tbl_usu WHERE per_id IS NOT NULL GROUP BY per_id) as usuarios'),
+                    'p.per_id', '=', 'usuarios.per_id'
                 )
-                ->leftJoin('tbl_usu', 'tbl_per.per_id', '=', 'tbl_usu.per_id')
-                ->leftJoin('tbl_perm', 'tbl_per.per_id', '=', 'tbl_perm.per_id');
+                ->leftJoin(
+                    DB::raw('(SELECT per_id, COUNT(*) as total_permisos FROM tbl_perm WHERE per_id IS NOT NULL GROUP BY per_id) as permisos'),
+                    'p.per_id', '=', 'permisos.per_id'
+                )
+                ->select([
+                    'p.per_id',
+                    'p.per_nom',
+                    'p.per_descripcion',
+                    'p.per_nivel',
+                    'p.per_activo',
+                    'p.per_cre',
+                    'p.per_edi',
+                    DB::raw('COALESCE(usuarios.total_usuarios, 0) as total_usuarios'),
+                    DB::raw('COALESCE(permisos.total_permisos, 0) as total_permisos')
+                ]);
 
+            // Filtros
             if (!empty($search)) {
-                $query->where('tbl_per.per_nom', 'ILIKE', "%{$search}%");
+                $query->where(function($q) use ($search) {
+                    $q->where('p.per_nom', 'ILIKE', "%{$search}%")
+                      ->orWhere('p.per_descripcion', 'ILIKE', "%{$search}%");
+                });
             }
 
-            $perfiles = $query->groupBy('tbl_per.per_id', 'tbl_per.per_nom')
-                            ->orderBy('tbl_per.per_id')
-                            ->paginate($perPage);
+            if (!empty($activo)) {
+                $query->where('p.per_activo', $request->boolean('activo'));
+            }
+
+            if (!empty($nivel)) {
+                $query->where('p.per_nivel', $nivel);
+            }
+
+            // Ordenamiento
+            $sortField = $request->get('sort_field', 'per_nom');
+            $sortDirection = $request->get('sort_direction', 'asc');
+            $query->orderBy($sortField, $sortDirection);
+
+            $perfiles = $query->paginate($perPage);
 
             return response()->json([
                 'status' => 'success',
@@ -50,12 +80,15 @@ class PerfilController extends Controller
     }
 
     /**
-     * Crear nuevo perfil
+     * Store a newly created resource in storage.
      */
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'per_nom' => 'required|string|max:100|unique:tbl_per,per_nom'
+            'per_nom' => 'required|string|max:100|unique:tbl_per,per_nom',
+            'per_descripcion' => 'nullable|string|max:500',
+            'per_nivel' => 'required|integer|min:1|max:10',
+            'per_activo' => 'boolean'
         ]);
 
         if ($validator->fails()) {
@@ -69,20 +102,18 @@ class PerfilController extends Controller
         try {
             DB::beginTransaction();
 
-            $perfil = Perfil::create([
-                'per_nom' => $request->per_nom
+            $perfilData = $request->only([
+                'per_nom', 'per_descripcion', 'per_nivel'
             ]);
+            
+            $perfilData['per_activo'] = $request->boolean('per_activo', true);
+            $perfilData['per_cre'] = Carbon::now();
+            $perfilData['per_edi'] = Carbon::now();
+
+            $perfil = Perfil::create($perfilData);
 
             // Obtener el perfil creado con contadores
-            $perfilCompleto = DB::table('tbl_per')
-                ->select(
-                    'tbl_per.per_id',
-                    'tbl_per.per_nom',
-                    DB::raw('0 as usuarios_count'),
-                    DB::raw('0 as permisos_count')
-                )
-                ->where('tbl_per.per_id', $perfil->per_id)
-                ->first();
+            $perfilCompleto = $this->getPerfilCompleto($perfil->per_id);
 
             DB::commit();
 
@@ -102,23 +133,12 @@ class PerfilController extends Controller
     }
 
     /**
-     * Obtener perfil específico
+     * Display the specified resource.
      */
     public function show($id)
     {
         try {
-            $perfil = DB::table('tbl_per')
-                ->select(
-                    'tbl_per.per_id',
-                    'tbl_per.per_nom',
-                    DB::raw('COUNT(DISTINCT tbl_usu.usu_id) as usuarios_count'),
-                    DB::raw('COUNT(DISTINCT tbl_perm.perm_id) as permisos_count')
-                )
-                ->leftJoin('tbl_usu', 'tbl_per.per_id', '=', 'tbl_usu.per_id')
-                ->leftJoin('tbl_perm', 'tbl_per.per_id', '=', 'tbl_perm.per_id')
-                ->where('tbl_per.per_id', $id)
-                ->groupBy('tbl_per.per_id', 'tbl_per.per_nom')
-                ->first();
+            $perfil = $this->getPerfilCompleto($id);
 
             if (!$perfil) {
                 return response()->json([
@@ -140,7 +160,7 @@ class PerfilController extends Controller
     }
 
     /**
-     * Actualizar perfil
+     * Update the specified resource in storage.
      */
     public function update(Request $request, $id)
     {
@@ -154,7 +174,10 @@ class PerfilController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'per_nom' => 'required|string|max:100|unique:tbl_per,per_nom,' . $id . ',per_id'
+            'per_nom' => 'sometimes|required|string|max:100|unique:tbl_per,per_nom,' . $id . ',per_id',
+            'per_descripcion' => 'nullable|string|max:500',
+            'per_nivel' => 'sometimes|required|integer|min:1|max:10',
+            'per_activo' => 'boolean'
         ]);
 
         if ($validator->fails()) {
@@ -168,23 +191,20 @@ class PerfilController extends Controller
         try {
             DB::beginTransaction();
 
-            $perfil->update([
-                'per_nom' => $request->per_nom
+            $perfilData = $request->only([
+                'per_nom', 'per_descripcion', 'per_nivel'
             ]);
+            
+            if ($request->has('per_activo')) {
+                $perfilData['per_activo'] = $request->boolean('per_activo');
+            }
+            
+            $perfilData['per_edi'] = Carbon::now();
+
+            $perfil->update($perfilData);
 
             // Obtener el perfil actualizado con contadores
-            $perfilCompleto = DB::table('tbl_per')
-                ->select(
-                    'tbl_per.per_id',
-                    'tbl_per.per_nom',
-                    DB::raw('COUNT(DISTINCT tbl_usu.usu_id) as usuarios_count'),
-                    DB::raw('COUNT(DISTINCT tbl_perm.perm_id) as permisos_count')
-                )
-                ->leftJoin('tbl_usu', 'tbl_per.per_id', '=', 'tbl_usu.per_id')
-                ->leftJoin('tbl_perm', 'tbl_per.per_id', '=', 'tbl_perm.per_id')
-                ->where('tbl_per.per_id', $id)
-                ->groupBy('tbl_per.per_id', 'tbl_per.per_nom')
-                ->first();
+            $perfilCompleto = $this->getPerfilCompleto($id);
 
             DB::commit();
 
@@ -204,7 +224,7 @@ class PerfilController extends Controller
     }
 
     /**
-     * Eliminar perfil
+     * Remove the specified resource from storage.
      */
     public function destroy($id)
     {
@@ -234,6 +254,7 @@ class PerfilController extends Controller
 
             // Eliminar permisos asociados
             DB::table('tbl_perm')->where('per_id', $id)->delete();
+            DB::table('tbl_perm_perfil')->where('per_id', $id)->delete();
             
             // Eliminar perfil
             $perfil->delete();
@@ -255,7 +276,48 @@ class PerfilController extends Controller
     }
 
     /**
-     * Obtener usuarios de un perfil específico
+     * Toggle profile status (active/inactive)
+     */
+    public function toggleStatus($id)
+    {
+        try {
+            $perfil = Perfil::find($id);
+            
+            if (!$perfil) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Perfil no encontrado'
+                ], 404);
+            }
+
+            DB::beginTransaction();
+
+            $nuevoEstado = !$perfil->per_activo;
+            $perfil->per_activo = $nuevoEstado;
+            $perfil->per_edi = Carbon::now();
+            $perfil->save();
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => $nuevoEstado ? 'Perfil activado exitosamente' : 'Perfil desactivado exitosamente',
+                'data' => [
+                    'per_activo' => $nuevoEstado
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al cambiar estado del perfil: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get users assigned to a specific profile
      */
     public function getUsuarios($id)
     {
@@ -271,7 +333,7 @@ class PerfilController extends Controller
 
             $usuarios = DB::table('tbl_usu')
                 ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-                ->select(
+                ->select([
                     'tbl_usu.usu_id',
                     'tbl_usu.usu_nom',
                     'tbl_usu.usu_nom2',
@@ -279,9 +341,12 @@ class PerfilController extends Controller
                     'tbl_usu.usu_ape2',
                     'tbl_usu.usu_cor',
                     'tbl_usu.usu_ced',
+                    'tbl_usu.usu_deshabilitado',
+                    'tbl_usu.usu_fecha_registro',
+                    'tbl_usu.usu_ultimo_acceso',
                     'tbl_est.est_nom as estado',
                     DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
-                )
+                ])
                 ->where('tbl_usu.per_id', $id)
                 ->orderBy('tbl_usu.usu_nom')
                 ->get();
@@ -289,7 +354,13 @@ class PerfilController extends Controller
             return response()->json([
                 'status' => 'success',
                 'data' => [
-                    'perfil' => $perfil,
+                    'perfil' => [
+                        'per_id' => $perfil->per_id,
+                        'per_nom' => $perfil->per_nom,
+                        'per_descripcion' => $perfil->per_descripcion,
+                        'per_nivel' => $perfil->per_nivel,
+                        'per_activo' => $perfil->per_activo
+                    ],
                     'usuarios' => $usuarios,
                     'total_usuarios' => $usuarios->count()
                 ]
@@ -303,12 +374,42 @@ class PerfilController extends Controller
     }
 
     /**
-     * Duplicar perfil con sus permisos
+     * Get form options for profile creation/editing
+     */
+    public function getFormOptions()
+    {
+        try {
+            $niveles = [];
+            for ($i = 1; $i <= 10; $i++) {
+                $niveles[] = [
+                    'value' => $i,
+                    'label' => "Nivel {$i}"
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'niveles' => $niveles
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al obtener opciones: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Duplicate profile with its permissions
      */
     public function duplicate(Request $request, $id)
     {
         $validator = Validator::make($request->all(), [
-            'nuevo_nombre' => 'required|string|max:100|unique:tbl_per,per_nom'
+            'per_nom' => 'required|string|max:100|unique:tbl_per,per_nom',
+            'per_descripcion' => 'nullable|string|max:500'
         ]);
 
         if ($validator->fails()) {
@@ -333,7 +434,12 @@ class PerfilController extends Controller
 
             // Crear nuevo perfil
             $nuevoPerfil = Perfil::create([
-                'per_nom' => $request->nuevo_nombre
+                'per_nom' => $request->per_nom,
+                'per_descripcion' => $request->per_descripcion ?? $perfilOriginal->per_descripcion,
+                'per_nivel' => $perfilOriginal->per_nivel,
+                'per_activo' => true,
+                'per_cre' => Carbon::now(),
+                'per_edi' => Carbon::now()
             ]);
 
             // Copiar permisos del perfil original
@@ -341,6 +447,7 @@ class PerfilController extends Controller
                 ->where('per_id', $id)
                 ->get();
 
+            $permisosCopiadosCount = 0;
             foreach ($permisosOriginales as $permiso) {
                 DB::table('tbl_perm')->insert([
                     'per_id' => $nuevoPerfil->per_id,
@@ -348,18 +455,34 @@ class PerfilController extends Controller
                     'sub_id' => $permiso->sub_id,
                     'opc_id' => $permiso->opc_id
                 ]);
+                $permisosCopiadosCount++;
             }
+
+            // Copiar permisos de perfil específicos si existen
+            $permisosPerfilOriginales = DB::table('tbl_perm_perfil')
+                ->where('per_id', $id)
+                ->get();
+
+            foreach ($permisosPerfilOriginales as $permiso) {
+                DB::table('tbl_perm_perfil')->insert([
+                    'per_id' => $nuevoPerfil->per_id,
+                    'men_id' => $permiso->men_id,
+                    'sub_id' => $permiso->sub_id,
+                    'opc_id' => $permiso->opc_id,
+                    'perm_per_activo' => $permiso->perm_per_activo,
+                    'perm_per_cre' => Carbon::now(),
+                    'perm_per_edi' => Carbon::now()
+                ]);
+            }
+
+            $perfilCompleto = $this->getPerfilCompleto($nuevoPerfil->per_id);
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => "Perfil duplicado exitosamente. Se copiaron {$permisosOriginales->count()} permisos",
-                'data' => [
-                    'nuevo_perfil_id' => $nuevoPerfil->per_id,
-                    'nuevo_perfil_nombre' => $nuevoPerfil->per_nom,
-                    'permisos_copiados' => $permisosOriginales->count()
-                ]
+                'message' => "Perfil duplicado exitosamente. Se copiaron {$permisosCopiadosCount} permisos",
+                'data' => $perfilCompleto
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -372,54 +495,31 @@ class PerfilController extends Controller
     }
 
     /**
-     * Obtener resumen de permisos del perfil
+     * Get complete profile information
      */
-    public function getPermissionsSummary($id)
+    private function getPerfilCompleto($id)
     {
-        try {
-            $perfil = Perfil::find($id);
-            
-            if (!$perfil) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Perfil no encontrado'
-                ], 404);
-            }
-
-            // Contar permisos por tipo
-            $resumenPermisos = [
-                'menus' => DB::table('tbl_perm')
-                    ->where('per_id', $id)
-                    ->whereNull('sub_id')
-                    ->whereNull('opc_id')
-                    ->count(),
-                'submenus' => DB::table('tbl_perm')
-                    ->where('per_id', $id)
-                    ->whereNotNull('sub_id')
-                    ->whereNull('opc_id')
-                    ->count(),
-                'opciones' => DB::table('tbl_perm')
-                    ->where('per_id', $id)
-                    ->whereNotNull('opc_id')
-                    ->count()
-            ];
-
-            $resumenPermisos['total'] = $resumenPermisos['menus'] + 
-                                       $resumenPermisos['submenus'] + 
-                                       $resumenPermisos['opciones'];
-
-            return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'perfil' => $perfil,
-                    'resumen_permisos' => $resumenPermisos
-                ]
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error al obtener resumen de permisos: ' . $e->getMessage()
-            ], 500);
-        }
+        return DB::table('tbl_per as p')
+            ->leftJoin(
+                DB::raw('(SELECT per_id, COUNT(*) as total_usuarios FROM tbl_usu WHERE per_id IS NOT NULL GROUP BY per_id) as usuarios'),
+                'p.per_id', '=', 'usuarios.per_id'
+            )
+            ->leftJoin(
+                DB::raw('(SELECT per_id, COUNT(*) as total_permisos FROM tbl_perm WHERE per_id IS NOT NULL GROUP BY per_id) as permisos'),
+                'p.per_id', '=', 'permisos.per_id'
+            )
+            ->where('p.per_id', $id)
+            ->select([
+                'p.per_id',
+                'p.per_nom',
+                'p.per_descripcion',
+                'p.per_nivel',
+                'p.per_activo',
+                'p.per_cre',
+                'p.per_edi',
+                DB::raw('COALESCE(usuarios.total_usuarios, 0) as total_usuarios'),
+                DB::raw('COALESCE(permisos.total_permisos, 0) as total_permisos')
+            ])
+            ->first();
     }
 }

@@ -79,6 +79,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Route::middleware(\App\Http\Middleware\CheckPermissions::class.':Sistema.Perfiles')->group(function () {
         Route::apiResource('perfiles', PerfilController::class);
         Route::get('/perfiles/{id}/usuarios', [PerfilController::class, 'getUsuarios']);
+        Route::put('/perfiles/{id}/toggle-status', [PerfilController::class, 'toggleStatus']);
+        Route::get('/perfiles/{id}/usuarios', [PerfilController::class, 'getUsuarios']);
+        Route::post('/perfiles/{id}/duplicate', [PerfilController::class, 'duplicate']);
+        
+        // Opciones para formularios
+        Route::get('/perfiles-form-options', [PerfilController::class, 'getFormOptions']);
     // });
 
     // === GESTIÓN DE ESTADOS ===

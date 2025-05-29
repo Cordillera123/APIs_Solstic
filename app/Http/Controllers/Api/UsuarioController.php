@@ -5,14 +5,20 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\Usuario;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
+use Carbon\Carbon;
 
 class UsuarioController extends Controller
 {
     /**
-     * Obtener todos los usuarios con paginación
+     * Display a listing of the resource.
+     */
+    
+    /**
+     * Display a listing of the resource.
      */
     public function index(Request $request)
     {
@@ -21,10 +27,12 @@ class UsuarioController extends Controller
             $search = $request->get('search', '');
             $perfilId = $request->get('perfil_id', '');
             $estadoId = $request->get('estado_id', '');
+            $activo = $request->get('activo', '');
 
             $query = DB::table('tbl_usu')
                 ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
                 ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
+                ->leftJoin('tbl_usu as creador', 'tbl_usu.usu_creado_por', '=', 'creador.usu_id')
                 ->select(
                     'tbl_usu.usu_id',
                     'tbl_usu.usu_nom',
@@ -35,10 +43,20 @@ class UsuarioController extends Controller
                     'tbl_usu.usu_ced',
                     'tbl_usu.usu_tel',
                     'tbl_usu.usu_dir',
+                    'tbl_usu.usu_descripcion',
+                    'tbl_usu.usu_fecha_nacimiento',
+                    'tbl_usu.usu_fecha_registro',
+                    'tbl_usu.usu_ultimo_acceso',
+                    'tbl_usu.usu_intentos_fallidos',
+                    'tbl_usu.usu_bloqueado_hasta',
+                    'tbl_usu.usu_deshabilitado',
                     'tbl_per.per_nom as perfil',
                     'tbl_est.est_nom as estado',
                     'tbl_usu.per_id',
                     'tbl_usu.est_id',
+                    'creador.usu_nom as creado_por_nombre',
+                    'tbl_usu.usu_cre',
+                    'tbl_usu.usu_edi',
                     DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
                 );
 
@@ -61,7 +79,11 @@ class UsuarioController extends Controller
                 $query->where('tbl_usu.est_id', $estadoId);
             }
 
-            $usuarios = $query->orderBy('tbl_usu.usu_id', 'desc')
+            if (!empty($activo)) {
+                $query->where('tbl_usu.usu_deshabilitado', !$request->boolean('activo'));
+            }
+
+            $usuarios = $query->orderBy('tbl_usu.usu_fecha_registro', 'desc')
                             ->paginate($perPage);
 
             return response()->json([
@@ -77,7 +99,7 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Crear nuevo usuario
+     * Store a newly created resource in storage.
      */
     public function store(Request $request)
     {
@@ -92,7 +114,9 @@ class UsuarioController extends Controller
             'usu_tel' => 'nullable|string|max:10',
             'usu_dir' => 'nullable|string|max:100',
             'per_id' => 'required|integer|exists:tbl_per,per_id',
-            'est_id' => 'required|integer|exists:tbl_est,est_id'
+            'est_id' => 'required|integer|exists:tbl_est,est_id',
+            'usu_descripcion' => 'nullable|string',
+            'usu_fecha_nacimiento' => 'nullable|date|before:today'
         ]);
 
         if ($validator->fails()) {
@@ -106,24 +130,33 @@ class UsuarioController extends Controller
         try {
             DB::beginTransaction();
 
-            $usuarioData = $request->all();
+            $usuarioData = $request->only([
+                'usu_nom', 'usu_nom2', 'usu_ape', 'usu_ape2', 'usu_cor', 'usu_ced',
+                'usu_tel', 'usu_dir', 'per_id', 'est_id', 'usu_descripcion', 'usu_fecha_nacimiento'
+            ]);
             
             // Hashear la contraseña
             $usuarioData['usu_con'] = Hash::make($request->usu_con);
+            
+            // Campos adicionales
+            $usuarioData['usu_fecha_registro'] = Carbon::now();
+            $usuarioData['usu_deshabilitado'] = false;
+            $usuarioData['usu_intentos_fallidos'] = 0;
+            
+            // Si hay un usuario autenticado, asignar como creador
+            try {
+                if (Auth::check() && Auth::user()) {
+                    $usuarioData['usu_creado_por'] = Auth::user()->usu_id;
+                    $usuarioData['usu_editado_por'] = Auth::user()->usu_id;
+                }
+            } catch (\Exception $e) {
+                // Si hay error con la autenticación, continuar sin asignar creador
+            }
 
             $usuario = Usuario::create($usuarioData);
 
             // Obtener el usuario creado con relaciones
-            $usuarioCompleto = DB::table('tbl_usu')
-                ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
-                ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-                ->select(
-                    'tbl_usu.*',
-                    'tbl_per.per_nom as perfil',
-                    'tbl_est.est_nom as estado'
-                )
-                ->where('tbl_usu.usu_id', $usuario->usu_id)
-                ->first();
+            $usuarioCompleto = $this->getUsuarioCompleto($usuario->usu_id);
 
             DB::commit();
 
@@ -143,21 +176,12 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Obtener usuario específico
+     * Display the specified resource.
      */
     public function show($id)
     {
         try {
-            $usuario = DB::table('tbl_usu')
-                ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
-                ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-                ->select(
-                    'tbl_usu.*',
-                    'tbl_per.per_nom as perfil',
-                    'tbl_est.est_nom as estado'
-                )
-                ->where('tbl_usu.usu_id', $id)
-                ->first();
+            $usuario = $this->getUsuarioCompleto($id);
 
             if (!$usuario) {
                 return response()->json([
@@ -182,7 +206,7 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Actualizar usuario
+     * Update the specified resource in storage.
      */
     public function update(Request $request, $id)
     {
@@ -206,7 +230,9 @@ class UsuarioController extends Controller
             'usu_tel' => 'nullable|string|max:10',
             'usu_dir' => 'nullable|string|max:100',
             'per_id' => 'sometimes|required|integer|exists:tbl_per,per_id',
-            'est_id' => 'sometimes|required|integer|exists:tbl_est,est_id'
+            'est_id' => 'sometimes|required|integer|exists:tbl_est,est_id',
+            'usu_descripcion' => 'nullable|string',
+            'usu_fecha_nacimiento' => 'nullable|date|before:today'
         ]);
 
         if ($validator->fails()) {
@@ -220,29 +246,20 @@ class UsuarioController extends Controller
         try {
             DB::beginTransaction();
 
-            $usuarioData = $request->all();
+            $usuarioData = $request->only([
+                'usu_nom', 'usu_nom2', 'usu_ape', 'usu_ape2', 'usu_cor', 'usu_ced',
+                'usu_tel', 'usu_dir', 'per_id', 'est_id', 'usu_descripcion', 'usu_fecha_nacimiento'
+            ]);
             
             // Si se proporciona nueva contraseña, hashearla
             if (!empty($request->usu_con)) {
                 $usuarioData['usu_con'] = Hash::make($request->usu_con);
-            } else {
-                // Si no se proporciona contraseña, no actualizarla
-                unset($usuarioData['usu_con']);
             }
 
             $usuario->update($usuarioData);
 
             // Obtener el usuario actualizado con relaciones
-            $usuarioCompleto = DB::table('tbl_usu')
-                ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
-                ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-                ->select(
-                    'tbl_usu.*',
-                    'tbl_per.per_nom as perfil',
-                    'tbl_est.est_nom as estado'
-                )
-                ->where('tbl_usu.usu_id', $id)
-                ->first();
+            $usuarioCompleto = $this->getUsuarioCompleto($id);
 
             // Ocultar contraseña
             unset($usuarioCompleto->usu_con);
@@ -265,7 +282,7 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Eliminar usuario
+     * Remove the specified resource from storage.
      */
     public function destroy($id)
     {
@@ -280,6 +297,17 @@ class UsuarioController extends Controller
             }
 
             DB::beginTransaction();
+
+            // Verificar si el usuario tiene dependencias
+            $tienePermisos = DB::table('tbl_perm_usuario')->where('usu_id', $id)->exists();
+            $tienePermisosUsuario = DB::table('tbl_usu_perm')->where('usu_id', $id)->exists();
+            
+            if ($tienePermisos || $tienePermisosUsuario) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No se puede eliminar el usuario porque tiene permisos asignados'
+                ], 400);
+            }
 
             // Eliminar tokens de acceso del usuario
             $usuario->tokens()->delete();
@@ -304,7 +332,7 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Cambiar estado del usuario (activar/desactivar)
+     * Toggle user status (enable/disable)
      */
     public function toggleStatus($id)
     {
@@ -320,30 +348,23 @@ class UsuarioController extends Controller
 
             DB::beginTransaction();
 
-            // Alternar entre estado activo (1) e inactivo (2)
-            // Asumiendo que 1 = Activo, 2 = Inactivo
-            $nuevoEstado = ($usuario->est_id == 1) ? 2 : 1;
-            $usuario->est_id = $nuevoEstado;
+            // Alternar estado de deshabilitado
+            $nuevoEstado = !$usuario->usu_deshabilitado;
+            $usuario->usu_deshabilitado = $nuevoEstado;
             $usuario->save();
 
             // Si se desactiva el usuario, revocar todos sus tokens
-            if ($nuevoEstado == 2) {
+            if ($nuevoEstado) {
                 $usuario->tokens()->delete();
             }
 
             DB::commit();
 
-            // Obtener nombre del estado
-            $estadoNombre = DB::table('tbl_est')
-                ->where('est_id', $nuevoEstado)
-                ->value('est_nom');
-
             return response()->json([
                 'status' => 'success',
-                'message' => "Usuario {$estadoNombre} exitosamente",
-                'new_status' => [
-                    'id' => $nuevoEstado,
-                    'nombre' => $estadoNombre
+                'message' => $nuevoEstado ? 'Usuario deshabilitado exitosamente' : 'Usuario habilitado exitosamente',
+                'data' => [
+                    'usu_deshabilitado' => $nuevoEstado
                 ]
             ]);
         } catch (\Exception $e) {
@@ -357,24 +378,25 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Cambiar contraseña del usuario
+     * Change user password
      */
     public function changePassword(Request $request, $id)
     {
-        $validator = Validator::make($request->all(), [
-            'current_password' => 'required|string',
-            'new_password' => 'required|string|min:6|confirmed'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Datos de validación incorrectos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
         try {
+            $validator = Validator::make($request->all(), [
+                'current_password' => 'required|string',
+                'new_password' => 'required|string|min:6|max:64',
+                'confirm_password' => 'required|string|same:new_password'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Datos de validación incorrectos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
             $usuario = Usuario::find($id);
             
             if (!$usuario) {
@@ -384,7 +406,6 @@ class UsuarioController extends Controller
                 ], 404);
             }
 
-            // Verificar contraseña actual
             if (!Hash::check($request->current_password, $usuario->usu_con)) {
                 return response()->json([
                     'status' => 'error',
@@ -394,19 +415,18 @@ class UsuarioController extends Controller
 
             DB::beginTransaction();
 
-            // Actualizar contraseña
-            $usuario->usu_con = Hash::make($request->new_password);
-            $usuario->save();
-
-            // Revocar todos los tokens existentes para forzar nuevo login
-            $usuario->tokens()->delete();
+            $usuario->update([
+                'usu_con' => Hash::make($request->new_password),
+                'usu_fecha_cambio_clave' => Carbon::now()
+            ]);
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Contraseña actualizada exitosamente'
+                'message' => 'Contraseña cambiada exitosamente'
             ]);
+
         } catch (\Exception $e) {
             DB::rollBack();
             
@@ -418,23 +438,23 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Resetear contraseña del usuario (solo para administradores)
+     * Reset user password (admin action)
      */
     public function resetPassword(Request $request, $id)
     {
-        $validator = Validator::make($request->all(), [
-            'new_password' => 'required|string|min:6'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Datos de validación incorrectos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
         try {
+            $validator = Validator::make($request->all(), [
+                'new_password' => 'required|string|min:6|max:64'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Datos de validación incorrectos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
             $usuario = Usuario::find($id);
             
             if (!$usuario) {
@@ -446,41 +466,46 @@ class UsuarioController extends Controller
 
             DB::beginTransaction();
 
-            // Actualizar contraseña
-            $usuario->usu_con = Hash::make($request->new_password);
-            $usuario->save();
-
-            // Revocar todos los tokens existentes
-            $usuario->tokens()->delete();
+            $usuario->update([
+                'usu_con' => Hash::make($request->new_password),
+                'usu_fecha_actualizacion_clave' => Carbon::now(),
+                'usu_intentos_fallidos' => 0,
+                'usu_bloqueado_hasta' => null
+            ]);
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Contraseña reseteada exitosamente'
+                'message' => 'Contraseña restablecida exitosamente'
             ]);
+
         } catch (\Exception $e) {
             DB::rollBack();
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al resetear contraseña: ' . $e->getMessage()
+                'message' => 'Error al restablecer contraseña: ' . $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Obtener opciones para formularios
+     * Get form options for user creation/editing
      */
     public function getFormOptions()
     {
         try {
             $perfiles = DB::table('tbl_per')
+                ->where('per_activo', true)
                 ->select('per_id as value', 'per_nom as label')
+                ->orderBy('per_nom')
                 ->get();
 
             $estados = DB::table('tbl_est')
+                ->where('est_activo', true)
                 ->select('est_id as value', 'est_nom as label')
+                ->orderBy('est_nom')
                 ->get();
 
             return response()->json([
@@ -490,6 +515,7 @@ class UsuarioController extends Controller
                     'estados' => $estados
                 ]
             ]);
+
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
@@ -497,6 +523,53 @@ class UsuarioController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get complete user information
+     */
+    private function getUsuarioCompleto($id)
+    {
+        return DB::table('tbl_usu')
+            ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
+            ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
+            ->leftJoin('tbl_usu as creador', 'tbl_usu.usu_creado_por', '=', 'creador.usu_id')
+            ->leftJoin('tbl_usu as editor', 'tbl_usu.usu_editado_por', '=', 'editor.usu_id')
+            ->where('tbl_usu.usu_id', $id)
+            ->select(
+                'tbl_usu.usu_id',
+                'tbl_usu.usu_nom',
+                'tbl_usu.usu_nom2',
+                'tbl_usu.usu_ape',
+                'tbl_usu.usu_ape2',
+                'tbl_usu.usu_cor',
+                'tbl_usu.usu_ced',
+                'tbl_usu.usu_tel',
+                'tbl_usu.usu_dir',
+                'tbl_usu.per_id',
+                'tbl_usu.est_id',
+                'tbl_usu.usu_descripcion',
+                'tbl_usu.usu_fecha_nacimiento',
+                'tbl_usu.usu_fecha_registro',
+                'tbl_usu.usu_ultimo_acceso',
+                'tbl_usu.usu_intentos_fallidos',
+                'tbl_usu.usu_bloqueado_hasta',
+                'tbl_usu.usu_deshabilitado',
+                'tbl_usu.usu_cre',
+                'tbl_usu.usu_edi',
+                'tbl_per.per_nom as perfil',
+                'tbl_est.est_nom as estado',
+                'creador.usu_nom as creado_por_nombre',
+                'editor.usu_nom as editado_por_nombre',
+                DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
+            )
+            ->first();
+    }
+
+    /**
+     * Get complete user information
+     */
+    
+
 
     /**
      * Obtener permisos del usuario

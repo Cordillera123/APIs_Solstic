@@ -78,7 +78,7 @@ class OptionController extends Controller
                 'ico_id' => $validated['ico_id'] ?? null,
                 'opc_componente' => $validated['opc_componente'] ?? null,
                 'opc_ventana_directa' => $validated['opc_ventana_directa'] ?? false, // ✅ AGREGAR ESTA LÍNEA
-                'opc_est' => false
+                'opc_est' => true
             ];
 
             // Insertar opción

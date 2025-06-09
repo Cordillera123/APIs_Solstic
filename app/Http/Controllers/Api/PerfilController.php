@@ -14,6 +14,7 @@ class PerfilController extends Controller
 {
     /**
      * Display a listing of the resource.
+     * ✅ CORRECCIÓN: Devolver solo los elementos, no la paginación completa
      */
     public function index(Request $request)
     {
@@ -40,7 +41,7 @@ class PerfilController extends Controller
                     'p.per_activo',
                     'p.per_cre',
                     'p.per_edi',
-                    DB::raw('COALESCE(usuarios.total_usuarios, 0) as total_usuarios'),
+                    DB::raw('COALESCE(usuarios.total_usuarios, 0) as usuarios_count'), // ✅ Cambiar nombre para consistencia
                     DB::raw('COALESCE(permisos.total_permisos, 0) as total_permisos')
                 ]);
 
@@ -67,14 +68,25 @@ class PerfilController extends Controller
 
             $perfiles = $query->paginate($perPage);
 
+            // ✅ CORRECCIÓN PRINCIPAL: Devolver solo los elementos
             return response()->json([
                 'status' => 'success',
-                'data' => $perfiles
+                'message' => 'Perfiles obtenidos correctamente',
+                'data' => $perfiles->items(), // ✅ Solo los elementos, no la paginación completa
+                'pagination' => [
+                    'total' => $perfiles->total(),
+                    'current_page' => $perfiles->currentPage(),
+                    'per_page' => $perfiles->perPage(),
+                    'last_page' => $perfiles->lastPage(),
+                    'from' => $perfiles->firstItem(),
+                    'to' => $perfiles->lastItem()
+                ]
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al obtener perfiles: ' . $e->getMessage()
+                'message' => 'Error al obtener perfiles: ' . $e->getMessage(),
+                'data' => []
             ], 500);
         }
     }
@@ -95,7 +107,8 @@ class PerfilController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Datos de validación incorrectos',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
+                'data' => null
             ], 422);
         }
 
@@ -127,7 +140,8 @@ class PerfilController extends Controller
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al crear perfil: ' . $e->getMessage()
+                'message' => 'Error al crear perfil: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
@@ -143,18 +157,21 @@ class PerfilController extends Controller
             if (!$perfil) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Perfil no encontrado'
+                    'message' => 'Perfil no encontrado',
+                    'data' => null
                 ], 404);
             }
 
             return response()->json([
                 'status' => 'success',
+                'message' => 'Perfil obtenido correctamente',
                 'data' => $perfil
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al obtener perfil: ' . $e->getMessage()
+                'message' => 'Error al obtener perfil: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
@@ -169,7 +186,8 @@ class PerfilController extends Controller
         if (!$perfil) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Perfil no encontrado'
+                'message' => 'Perfil no encontrado',
+                'data' => null
             ], 404);
         }
 
@@ -184,7 +202,8 @@ class PerfilController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Datos de validación incorrectos',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
+                'data' => null
             ], 422);
         }
 
@@ -218,7 +237,8 @@ class PerfilController extends Controller
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al actualizar perfil: ' . $e->getMessage()
+                'message' => 'Error al actualizar perfil: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
@@ -234,7 +254,8 @@ class PerfilController extends Controller
             if (!$perfil) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Perfil no encontrado'
+                    'message' => 'Perfil no encontrado',
+                    'data' => null
                 ], 404);
             }
 
@@ -246,11 +267,19 @@ class PerfilController extends Controller
             if ($usuariosCount > 0) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => "No se puede eliminar el perfil porque tiene {$usuariosCount} usuario(s) asignado(s)"
+                    'message' => "No se puede eliminar el perfil porque tiene {$usuariosCount} usuario(s) asignado(s)",
+                    'data' => null
                 ], 400);
             }
 
             DB::beginTransaction();
+
+            // Guardar información antes de eliminar
+            $perfilInfo = [
+                'per_id' => $perfil->per_id,
+                'per_nom' => $perfil->per_nom,
+                'per_descripcion' => $perfil->per_descripcion
+            ];
 
             // Eliminar permisos asociados
             DB::table('tbl_perm')->where('per_id', $id)->delete();
@@ -263,14 +292,16 @@ class PerfilController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Perfil eliminado exitosamente'
+                'message' => 'Perfil eliminado exitosamente',
+                'data' => $perfilInfo
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al eliminar perfil: ' . $e->getMessage()
+                'message' => 'Error al eliminar perfil: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
@@ -286,7 +317,8 @@ class PerfilController extends Controller
             if (!$perfil) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Perfil no encontrado'
+                    'message' => 'Perfil no encontrado',
+                    'data' => null
                 ], 404);
             }
 
@@ -303,7 +335,9 @@ class PerfilController extends Controller
                 'status' => 'success',
                 'message' => $nuevoEstado ? 'Perfil activado exitosamente' : 'Perfil desactivado exitosamente',
                 'data' => [
-                    'per_activo' => $nuevoEstado
+                    'per_id' => $perfil->per_id,
+                    'per_activo' => $nuevoEstado,
+                    'per_nom' => $perfil->per_nom
                 ]
             ]);
         } catch (\Exception $e) {
@@ -311,7 +345,8 @@ class PerfilController extends Controller
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al cambiar estado del perfil: ' . $e->getMessage()
+                'message' => 'Error al cambiar estado del perfil: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
@@ -327,7 +362,8 @@ class PerfilController extends Controller
             if (!$perfil) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Perfil no encontrado'
+                    'message' => 'Perfil no encontrado',
+                    'data' => null
                 ], 404);
             }
 
@@ -353,6 +389,7 @@ class PerfilController extends Controller
 
             return response()->json([
                 'status' => 'success',
+                'message' => 'Usuarios del perfil obtenidos correctamente',
                 'data' => [
                     'perfil' => [
                         'per_id' => $perfil->per_id,
@@ -368,7 +405,8 @@ class PerfilController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al obtener usuarios del perfil: ' . $e->getMessage()
+                'message' => 'Error al obtener usuarios del perfil: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
@@ -389,6 +427,7 @@ class PerfilController extends Controller
 
             return response()->json([
                 'status' => 'success',
+                'message' => 'Opciones obtenidas correctamente',
                 'data' => [
                     'niveles' => $niveles
                 ]
@@ -397,7 +436,8 @@ class PerfilController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al obtener opciones: ' . $e->getMessage()
+                'message' => 'Error al obtener opciones: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
@@ -416,7 +456,8 @@ class PerfilController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Datos de validación incorrectos',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
+                'data' => null
             ], 422);
         }
 
@@ -426,7 +467,8 @@ class PerfilController extends Controller
             if (!$perfilOriginal) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Perfil original no encontrado'
+                    'message' => 'Perfil original no encontrado',
+                    'data' => null
                 ], 404);
             }
 
@@ -489,13 +531,15 @@ class PerfilController extends Controller
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al duplicar perfil: ' . $e->getMessage()
+                'message' => 'Error al duplicar perfil: ' . $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }
 
     /**
      * Get complete profile information
+     * ✅ CORRECCIÓN: Asegurar que devuelva usuarios_count para consistencia con frontend
      */
     private function getPerfilCompleto($id)
     {
@@ -517,7 +561,7 @@ class PerfilController extends Controller
                 'p.per_activo',
                 'p.per_cre',
                 'p.per_edi',
-                DB::raw('COALESCE(usuarios.total_usuarios, 0) as total_usuarios'),
+                DB::raw('COALESCE(usuarios.total_usuarios, 0) as usuarios_count'), // ✅ Nombre consistente
                 DB::raw('COALESCE(permisos.total_permisos, 0) as total_permisos')
             ])
             ->first();

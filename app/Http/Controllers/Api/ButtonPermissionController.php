@@ -51,165 +51,90 @@ class ButtonPermissionController extends Controller
         }
     }
     private function getDirectWindowsWithButtonPermissions($perfilId)
-{
-    Log::info("🔍 ButtonController: Obteniendo ventanas directas para perfil: {$perfilId}");
+    {
+        Log::info("🔍 ButtonController: Obteniendo ventanas directas para perfil: {$perfilId}");
 
-    // 1. Obtener permisos del perfil
-    $permisosDelPerfil = DB::table('tbl_perm_perfil')
-        ->where('per_id', $perfilId)
-        ->where('perm_per_activo', true)
-        ->get();
-
-    if ($permisosDelPerfil->isEmpty()) {
-        Log::warning("⚠️ Perfil {$perfilId} no tiene permisos asignados");
-        return [];
-    }
-
-    $menuStructure = [];
-
-    // ===== NIVEL 1: MENÚS DIRECTOS =====
-    $menusDirectos = DB::table('tbl_men')
-        ->leftJoin('tbl_ico', 'tbl_men.ico_id', '=', 'tbl_ico.ico_id')
-        ->where('tbl_men.men_ventana_directa', true)
-        ->where('tbl_men.men_activo', true)
-        ->select(
-            'tbl_men.men_id',
-            'tbl_men.men_nom',
-            'tbl_men.men_componente',
-            'tbl_men.men_ventana_directa',
-            'tbl_ico.ico_nom as ico_nombre'
-        )
-        ->orderBy('tbl_men.men_eje')
-        ->get();
-
-    foreach ($menusDirectos as $menu) {
-        // ✅ VERIFICAR PERMISOS
-        $tienePermisoMenu = $permisosDelPerfil->where('men_id', $menu->men_id)
-            ->where('sub_id', null)
-            ->where('opc_id', null)
-            ->isNotEmpty();
-
-        if (!$tienePermisoMenu) {
-            Log::info("⚠️ Perfil no tiene permiso al menú: {$menu->men_nom}");
-            continue;
-        }
-
-        // ✅ CORRECCIÓN CRÍTICA: Obtener SOLO los botones asignados a este menú específico
-        $botones = DB::table('tbl_bot as b')
-            ->join('tbl_men_bot as mb', 'b.bot_id', '=', 'mb.bot_id') // ✅ CRUCIAL: JOIN con tbl_men_bot
-            ->leftJoin('tbl_ico as i', 'b.ico_id', '=', 'i.ico_id')
-            ->where('mb.men_id', $menu->men_id) // ✅ FILTRAR por menú específico
-            ->where('mb.men_bot_activo', true)  // ✅ Solo botones activos del menú
-            ->where('b.bot_activo', true)
-            ->select(
-                'b.bot_id',
-                'b.bot_nom',
-                'b.bot_codigo',
-                'b.bot_color',
-                'b.bot_tooltip',
-                'b.bot_confirmacion',
-                'i.ico_nom as ico_nombre'
-            )
-            ->orderBy('mb.men_bot_orden')
+        // 1. Obtener permisos del perfil
+        $permisosDelPerfil = DB::table('tbl_perm_perfil')
+            ->where('per_id', $perfilId)
+            ->where('perm_per_activo', true)
             ->get();
 
-        // ✅ Solo agregar si tiene botones asignados
-        if ($botones->isEmpty()) {
-            Log::info("⚠️ Menú '{$menu->men_nom}' no tiene botones asignados en tbl_men_bot");
-            continue;
+        if ($permisosDelPerfil->isEmpty()) {
+            Log::warning("⚠️ Perfil {$perfilId} no tiene permisos básicos asignados");
+            return [];
         }
 
-        // Para cada botón, verificar si tiene permiso activo
-        foreach ($botones as $boton) {
-            $tienePermiso = DB::table('tbl_perm_bot_perfil')
-                ->where('per_id', $perfilId)
-                ->where('men_id', $menu->men_id)
-                ->where('sub_id', null)
-                ->where('opc_id', null)
-                ->where('bot_id', $boton->bot_id)
-                ->where('perm_bot_per_activo', true)
-                ->exists();
+        Log::info("📋 Permisos básicos encontrados: " . $permisosDelPerfil->count());
 
-            $boton->has_permission = $tienePermiso;
-        }
+        $menuStructure = [];
 
-        $menuData = [
-            'men_id' => $menu->men_id,
-            'men_nom' => $menu->men_nom,
-            'men_componente' => $menu->men_componente,
-            'men_ventana_directa' => true,
-            'ico_nombre' => $menu->ico_nombre,
-            'botones' => $botones->toArray(),
-            'submenus' => []
-        ];
-
-        $menuStructure[] = $menuData;
-        Log::info("✅ Menú directo agregado: {$menu->men_nom} con " . $botones->count() . " botones");
-    }
-
-    // ===== NIVEL 2: SUBMENÚS DIRECTOS =====
-    $submenusDirectos = DB::table('tbl_sub')
-        ->leftJoin('tbl_ico', 'tbl_sub.ico_id', '=', 'tbl_ico.ico_id')
-        ->leftJoin('tbl_men_sub', 'tbl_sub.sub_id', '=', 'tbl_men_sub.sub_id')
-        ->leftJoin('tbl_men', 'tbl_men_sub.men_id', '=', 'tbl_men.men_id')
-        ->where('tbl_sub.sub_ventana_directa', true)
-        ->where('tbl_sub.sub_activo', true)
-        ->where('tbl_men.men_activo', true)
-        ->select(
-            'tbl_sub.sub_id',
-            'tbl_sub.sub_nom',
-            'tbl_sub.sub_componente',
-            'tbl_sub.sub_ventana_directa',
-            'tbl_ico.ico_nom as ico_nombre',
-            'tbl_men.men_id',
-            'tbl_men.men_nom'
-        )
-        ->orderBy('tbl_men.men_eje')
-        ->orderBy('tbl_sub.sub_eje')
-        ->get();
-
-    // Procesar submenús...
-    $submenusPorMenu = $submenusDirectos->groupBy('men_id');
-
-    foreach ($submenusPorMenu as $menId => $submenus) {
-        $menuExistente = null;
-        foreach ($menuStructure as &$menu) {
-            if ($menu['men_id'] == $menId) {
-                $menuExistente = &$menu;
-                break;
+        // ===== PROCESAR CADA PERMISO BÁSICO =====
+        foreach ($permisosDelPerfil as $permiso) {
+            // Determinar el tipo de módulo y si es ventana directa
+            $tipoModulo = $this->determinarTipoModulo($permiso);
+            
+            if (!$tipoModulo['es_ventana_directa']) {
+                continue; // Saltar si no es ventana directa
             }
+
+            Log::info("✅ Procesando {$tipoModulo['tipo']}: Men:{$permiso->men_id}, Sub:{$permiso->sub_id}, Opc:{$permiso->opc_id}");
+
+            // Obtener botones según el tipo de módulo
+            $botones = $this->obtenerBotonesParaModulo($perfilId, $permiso, $tipoModulo['tipo']);
+
+            if (empty($botones)) {
+                Log::info("⚠️ No hay botones para este módulo, saltando...");
+                continue; // Solo agregar módulos que tengan botones
+            }
+
+            // Agregar a la estructura jerárquica
+            $this->agregarModuloAEstructura($menuStructure, $permiso, $botones, $tipoModulo['tipo']);
         }
 
-        if (!$menuExistente) {
-            $menuPadre = $submenus->first();
-            $nuevoMenu = [
-                'men_id' => $menId,
-                'men_nom' => $menuPadre->men_nom,
-                'men_componente' => null,
-                'men_ventana_directa' => false,
-                'ico_nombre' => null,
-                'botones' => [],
-                'submenus' => []
+        Log::info("✅ Estructura final construida: " . count($menuStructure) . " menús con ventanas directas");
+        return $menuStructure;
+    }
+    private function determinarTipoModulo($permiso)
+    {
+        if ($permiso->opc_id) {
+            // Es una opción
+            $opcion = DB::table('tbl_opc')->where('opc_id', $permiso->opc_id)->first();
+            return [
+                'tipo' => 'opcion',
+                'es_ventana_directa' => $opcion && $opcion->opc_ventana_directa,
+                'info' => $opcion
             ];
-            $menuStructure[] = $nuevoMenu;
-            $menuExistente = &$menuStructure[count($menuStructure) - 1];
+        } elseif ($permiso->sub_id) {
+            // Es un submenú
+            $submenu = DB::table('tbl_sub')->where('sub_id', $permiso->sub_id)->first();
+            return [
+                'tipo' => 'submenu',
+                'es_ventana_directa' => $submenu && $submenu->sub_ventana_directa,
+                'info' => $submenu
+            ];
+        } else {
+            // Es un menú
+            $menu = DB::table('tbl_men')->where('men_id', $permiso->men_id)->first();
+            return [
+                'tipo' => 'menu',
+                'es_ventana_directa' => $menu && $menu->men_ventana_directa,
+                'info' => $menu
+            ];
         }
+    }
+    private function obtenerBotonesParaModulo($perfilId, $permiso, $tipoModulo)
+    {
+        $botones = [];
 
-        foreach ($submenus as $submenu) {
-            $tienePermisoSubmenu = $permisosDelPerfil->where('men_id', $submenu->men_id)
-                ->where(function ($perm) use ($submenu) {
-                    return $perm->sub_id == $submenu->sub_id || $perm->sub_id === null;
-                })
-                ->where('opc_id', null)
-                ->isNotEmpty();
-
-            if ($tienePermisoSubmenu) {
-                // ✅ CORRECCIÓN: Obtener SOLO los botones asignados a este submenú específico
+        switch ($tipoModulo) {
+            case 'opcion':
+                // Botones de una opción (tabla tbl_opc_bot)
                 $botones = DB::table('tbl_bot as b')
-                    ->join('tbl_sub_bot as sb', 'b.bot_id', '=', 'sb.bot_id') // ✅ CRUCIAL: JOIN con tbl_sub_bot
+                    ->join('tbl_opc_bot as ob', 'b.bot_id', '=', 'ob.bot_id')
                     ->leftJoin('tbl_ico as i', 'b.ico_id', '=', 'i.ico_id')
-                    ->where('sb.sub_id', $submenu->sub_id) // ✅ FILTRAR por submenú específico
-                    ->where('sb.sub_bot_activo', true)    // ✅ Solo botones activos del submenú
+                    ->where('ob.opc_id', $permiso->opc_id)
+                    ->where('ob.opc_bot_activo', true)
                     ->where('b.bot_activo', true)
                     ->select(
                         'b.bot_id',
@@ -218,49 +143,194 @@ class ButtonPermissionController extends Controller
                         'b.bot_color',
                         'b.bot_tooltip',
                         'b.bot_confirmacion',
-                        'i.ico_nom as ico_nombre'
+                        'i.ico_nom as ico_nombre',
+                        'ob.opc_bot_orden as orden'
+                    )
+                    ->orderBy('ob.opc_bot_orden')
+                    ->get();
+                break;
+
+            case 'submenu':
+                // Botones de un submenú (tabla tbl_sub_bot)
+                $botones = DB::table('tbl_bot as b')
+                    ->join('tbl_sub_bot as sb', 'b.bot_id', '=', 'sb.bot_id')
+                    ->leftJoin('tbl_ico as i', 'b.ico_id', '=', 'i.ico_id')
+                    ->where('sb.sub_id', $permiso->sub_id)
+                    ->where('sb.sub_bot_activo', true)
+                    ->where('b.bot_activo', true)
+                    ->select(
+                        'b.bot_id',
+                        'b.bot_nom',
+                        'b.bot_codigo',
+                        'b.bot_color',
+                        'b.bot_tooltip',
+                        'b.bot_confirmacion',
+                        'i.ico_nom as ico_nombre',
+                        'sb.sub_bot_orden as orden'
                     )
                     ->orderBy('sb.sub_bot_orden')
                     ->get();
+                break;
 
-                // ✅ Solo agregar si tiene botones asignados
-                if ($botones->isEmpty()) {
-                    Log::info("⚠️ Submenú '{$submenu->sub_nom}' no tiene botones asignados en tbl_sub_bot");
-                    continue;
-                }
+            case 'menu':
+                // Botones de un menú (tabla tbl_men_bot)
+                $botones = DB::table('tbl_bot as b')
+                    ->join('tbl_men_bot as mb', 'b.bot_id', '=', 'mb.bot_id')
+                    ->leftJoin('tbl_ico as i', 'b.ico_id', '=', 'i.ico_id')
+                    ->where('mb.men_id', $permiso->men_id)
+                    ->where('mb.men_bot_activo', true)
+                    ->where('b.bot_activo', true)
+                    ->select(
+                        'b.bot_id',
+                        'b.bot_nom',
+                        'b.bot_codigo',
+                        'b.bot_color',
+                        'b.bot_tooltip',
+                        'b.bot_confirmacion',
+                        'i.ico_nom as ico_nombre',
+                        'mb.men_bot_orden as orden'
+                    )
+                    ->orderBy('mb.men_bot_orden')
+                    ->get();
+                break;
+        }
 
-                foreach ($botones as $boton) {
-                    $tienePermiso = DB::table('tbl_perm_bot_perfil')
-                        ->where('per_id', $perfilId)
-                        ->where('men_id', $submenu->men_id)
-                        ->where('sub_id', $submenu->sub_id)
-                        ->where('opc_id', null)
-                        ->where('bot_id', $boton->bot_id)
-                        ->where('perm_bot_per_activo', true)
-                        ->exists();
+        // Verificar permisos del perfil para cada botón
+        foreach ($botones as $boton) {
+            $tienePermiso = DB::table('tbl_perm_bot_perfil')
+                ->where('per_id', $perfilId)
+                ->where('men_id', $permiso->men_id)
+                ->where('sub_id', $permiso->sub_id)
+                ->where('opc_id', $permiso->opc_id)
+                ->where('bot_id', $boton->bot_id)
+                ->where('perm_bot_per_activo', true)
+                ->exists();
 
-                    $boton->has_permission = $tienePermiso;
-                }
+            $boton->has_permission = $tienePermiso;
+        }
 
-                $submenuData = [
-                    'sub_id' => $submenu->sub_id,
-                    'sub_nom' => $submenu->sub_nom,
-                    'sub_componente' => $submenu->sub_componente,
-                    'sub_ventana_directa' => true,
-                    'ico_nombre' => $submenu->ico_nombre,
-                    'botones' => $botones->toArray(),
-                    'opciones' => []
-                ];
+        Log::info("🔘 Botones encontrados para {$tipoModulo}: " . $botones->count());
+        return $botones->toArray();
+    }
+    private function agregarModuloAEstructura(&$menuStructure, $permiso, $botones, $tipoModulo)
+    {
+        // Buscar o crear el menú principal
+        $menuIndex = $this->buscarOCrearMenuEnEstructura($menuStructure, $permiso->men_id);
 
-                $menuExistente['submenus'][] = $submenuData;
-                Log::info("✅ Submenú directo agregado: {$submenu->sub_nom} con " . $botones->count() . " botones");
-            }
+        switch ($tipoModulo) {
+            case 'menu':
+                // Agregar botones directamente al menú
+                $menuStructure[$menuIndex]['botones'] = $botones;
+                break;
+
+            case 'submenu':
+                // Buscar o crear el submenú
+                $submenuIndex = $this->buscarOCrearSubmenuEnEstructura($menuStructure[$menuIndex], $permiso->sub_id);
+                $menuStructure[$menuIndex]['submenus'][$submenuIndex]['botones'] = $botones;
+                break;
+
+            case 'opcion':
+                // Buscar o crear submenú y opción
+                $submenuIndex = $this->buscarOCrearSubmenuEnEstructura($menuStructure[$menuIndex], $permiso->sub_id);
+                $opcionIndex = $this->buscarOCrearOpcionEnEstructura($menuStructure[$menuIndex]['submenus'][$submenuIndex], $permiso->opc_id);
+                $menuStructure[$menuIndex]['submenus'][$submenuIndex]['opciones'][$opcionIndex]['botones'] = $botones;
+                break;
         }
     }
+    private function buscarOCrearMenuEnEstructura(&$menuStructure, $menId)
+    {
+        // Buscar menú existente
+        foreach ($menuStructure as $index => $menu) {
+            if ($menu['men_id'] === $menId) {
+                return $index;
+            }
+        }
 
-    Log::info("✅ Estructura final ButtonController: " . count($menuStructure) . " menús");
-    return $menuStructure;
-}
+        // Crear nuevo menú
+        $menuInfo = DB::table('tbl_men')
+            ->leftJoin('tbl_ico', 'tbl_men.ico_id', '=', 'tbl_ico.ico_id')
+            ->where('tbl_men.men_id', $menId)
+            ->select('tbl_men.*', 'tbl_ico.ico_nom as ico_nombre')
+            ->first();
+
+        $nuevoMenu = [
+            'men_id' => $menId,
+            'men_nom' => $menuInfo->men_nom ?? "Menú {$menId}",
+            'men_componente' => $menuInfo->men_componente,
+            'men_ventana_directa' => (bool) ($menuInfo->men_ventana_directa ?? false),
+            'ico_nombre' => $menuInfo->ico_nombre,
+            'botones' => [],
+            'submenus' => []
+        ];
+
+        $menuStructure[] = $nuevoMenu;
+        return count($menuStructure) - 1;
+    }
+    private function buscarOCrearSubmenuEnEstructura(&$menu, $subId)
+    {
+        if (!isset($menu['submenus'])) {
+            $menu['submenus'] = [];
+        }
+
+        // Buscar submenú existente
+        foreach ($menu['submenus'] as $index => $submenu) {
+            if ($submenu['sub_id'] === $subId) {
+                return $index;
+            }
+        }
+
+        // Crear nuevo submenú
+        $submenuInfo = DB::table('tbl_sub')
+            ->leftJoin('tbl_ico', 'tbl_sub.ico_id', '=', 'tbl_ico.ico_id')
+            ->where('tbl_sub.sub_id', $subId)
+            ->select('tbl_sub.*', 'tbl_ico.ico_nom as ico_nombre')
+            ->first();
+
+        $nuevoSubmenu = [
+            'sub_id' => $subId,
+            'sub_nom' => $submenuInfo->sub_nom ?? "Submenú {$subId}",
+            'sub_componente' => $submenuInfo->sub_componente,
+            'sub_ventana_directa' => (bool) ($submenuInfo->sub_ventana_directa ?? false),
+            'ico_nombre' => $submenuInfo->ico_nombre,
+            'botones' => [],
+            'opciones' => []
+        ];
+
+        $menu['submenus'][] = $nuevoSubmenu;
+        return count($menu['submenus']) - 1;
+    }
+    private function buscarOCrearOpcionEnEstructura(&$submenu, $opcId)
+    {
+        if (!isset($submenu['opciones'])) {
+            $submenu['opciones'] = [];
+        }
+
+        // Buscar opción existente
+        foreach ($submenu['opciones'] as $index => $opcion) {
+            if ($opcion['opc_id'] === $opcId) {
+                return $index;
+            }
+        }
+
+        // Crear nueva opción
+        $opcionInfo = DB::table('tbl_opc')
+            ->leftJoin('tbl_ico', 'tbl_opc.ico_id', '=', 'tbl_ico.ico_id')
+            ->where('tbl_opc.opc_id', $opcId)
+            ->select('tbl_opc.*', 'tbl_ico.ico_nom as ico_nombre')
+            ->first();
+
+        $nuevaOpcion = [
+            'opc_id' => $opcId,
+            'opc_nom' => $opcionInfo->opc_nom ?? "Opción {$opcId}",
+            'opc_componente' => $opcionInfo->opc_componente,
+            'opc_ventana_directa' => (bool) ($opcionInfo->opc_ventana_directa ?? false),
+            'ico_nombre' => $opcionInfo->ico_nombre,
+            'botones' => []
+        ];
+
+        $submenu['opciones'][] = $nuevaOpcion;
+        return count($submenu['opciones']) - 1;
+    }
     private function getMenuStructureWithButtonPermissions($perfilId)
     {
         // Obtener menús con permisos del perfil

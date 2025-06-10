@@ -8,16 +8,18 @@ use App\Http\Controllers\API\OptionController;
 use App\Http\Controllers\API\UsuarioController;
 use App\Http\Controllers\API\PermissionsController;
 use App\Http\Controllers\API\PerfilController;
-USE App\Http\Controllers\Api\DirectModulesController;
+use App\Http\Controllers\Api\DirectModulesController;
 use App\Http\Controllers\API\EstadoController;
 use App\Http\Controllers\API\ConfigController;
 use App\Http\Controllers\API\ButtonController;
 use App\Http\Controllers\API\ButtonPermissionController;
 use App\Http\Controllers\API\MenuButtonPermissionsController;
+use App\Http\Controllers\Api\UserButtonPermissionController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+
 
 // Rutas de configuración
 Route::apiResource('configs', ConfigController::class);
@@ -27,10 +29,12 @@ Route::post('/login', [AuthController::class, 'login']);
 
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
-    
+
     // === RUTAS DE AUTENTICACIÓN ===
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);
+    // ⚠️ RUTA TEMPORAL - ELIMINAR DESPUÉS
+
 
     // === RUTAS DE ICONOS ===
     Route::get('/icons', [IconController::class, 'index']);
@@ -493,7 +497,6 @@ Route::middleware('auth:sanctum')->group(function () {
             ], 500);
         }
     });
-
     Route::get('/button-permissions/profiles/{perfilId}', [ButtonPermissionController::class, 'getProfileButtonPermissions']);
     Route::post('/button-permissions/toggle', [ButtonPermissionController::class, 'toggleButtonPermission']);
     Route::post('/button-permissions/bulk-assign', [ButtonPermissionController::class, 'bulkAssignButtonPermissions']);
@@ -530,6 +533,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // === GESTIÓN DE ESTADOS ===
     Route::apiResource('estados', EstadoController::class);
 
+
+    // === GESTIÓN DE PERMISOS DE BOTONES POR USUARIO ===
+    Route::get('/user-button-permissions/profiles/{perfilId}/users', [UserButtonPermissionController::class, 'getUsersByProfile']);
+    Route::get('/user-button-permissions/users/{usuarioId}', [UserButtonPermissionController::class, 'getUserButtonPermissions']);
+    Route::post('/user-button-permissions/toggle', [UserButtonPermissionController::class, 'toggleUserButtonPermission']);
+    Route::delete('/user-button-permissions/remove-customization', [UserButtonPermissionController::class, 'removeUserCustomization']);
+    Route::delete('/user-button-permissions/users/{usuarioId}/reset', [UserButtonPermissionController::class, 'resetUserCustomizations']);
+    Route::post('/user-button-permissions/copy', [UserButtonPermissionController::class, 'copyUserCustomizations']);
+    Route::get('/user-button-permissions/users/{usuarioId}/effective-permissions/{opcId}', [UserButtonPermissionController::class, 'getUserEffectiveButtonPermissions']);
+    Route::post('/user-button-permissions/users/{usuarioId}/check-permission', [UserButtonPermissionController::class, 'checkUserButtonPermission']);
+    Route::post('/user-button-permissions/copy', [UserButtonPermissionController::class, 'copyUserCustomizations']);
+    Route::post('/user-button-permissions/users/{usuarioId}/check-menu-permission', [UserButtonPermissionController::class, 'checkUserMenuButtonPermission']);
     // === GESTIÓN DE PERMISOS ===
     Route::get('/permissions/profiles', [PermissionsController::class, 'getProfiles']);
     Route::get('/permissions/summary', [PermissionsController::class, 'getPermissionsSummary']);
@@ -545,8 +560,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/permissions/sync-button-permissions', [PermissionsController::class, 'syncButtonPermissionsFromOptions']);
     Route::post('/permissions/configuracion-masiva-botones', [PermissionsController::class, 'configuracionMasivaBotones']);
 
-    
-    
+
+
     // === RUTAS DE UTILIDADES ===
     Route::get('/form-options', function () {
         return response()->json([

@@ -79,7 +79,7 @@ class SubmenuController extends Controller
                 'sub_componente' => $validated['sub_componente'] ?? null,
                 'sub_eje' => $validated['sub_eje'] ?? 1,
                 'sub_ventana_directa' => $validated['sub_ventana_directa'] ?? false,
-                'sub_est' => false
+                'sub_est' => true
             ];
 
             // Insertar submenú

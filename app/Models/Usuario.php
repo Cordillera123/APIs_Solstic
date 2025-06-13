@@ -15,9 +15,9 @@ class Usuario extends Authenticatable
     protected $table = 'tbl_usu';
     protected $primaryKey = 'usu_id';
     public $timestamps = false; // Usamos campos personalizados
-    
+
     protected $fillable = [
-        'usu_nom', 'usu_nom2', 'usu_ape', 'usu_ape2', 'usu_cor', 
+        'usu_nom', 'usu_nom2', 'usu_ape', 'usu_ape2', 'usu_cor',
         'usu_ced', 'usu_con', 'usu_tel', 'usu_dir', 'per_id', 'est_id',
         'usu_descripcion', 'usu_fecha_nacimiento', 'usu_fecha_registro',
         'usu_fecha_actualizacion_clave', 'usu_fecha_cambio_clave',
@@ -27,7 +27,7 @@ class Usuario extends Authenticatable
     ];
 
     protected $hidden = [
-        'usu_con', 
+        'usu_con',
         'usu_clave_hasheada',
         'usu_nombre_encriptado'
     ];
@@ -51,6 +51,14 @@ class Usuario extends Authenticatable
         'usu_creado_por' => 'integer',
         'usu_editado_por' => 'integer'
     ];
+
+    /**
+     * Override: Desactiva el campo de contraseña
+     */
+    public function getAuthPasswordName()
+    {
+        return '_none_'; // ⚠️ Esto evita que Laravel haga nada con el campo password
+    }
 
     // ==================== RELACIONES ====================
 
@@ -91,10 +99,10 @@ class Usuario extends Authenticatable
     /**
      * Get the password for authentication.
      */
-    public function getAuthPassword()
-    {
-        return $this->usu_con;
-    }
+    // public function getAuthPassword()
+    // {
+    //     return $this->usu_con;
+    // }
 
     /**
      * Get the email for password reset.
@@ -231,7 +239,7 @@ class Usuario extends Authenticatable
     public function incrementarIntentosFallidos()
     {
         $this->increment('usu_intentos_fallidos');
-        
+
         // Bloquear después de 5 intentos fallidos por 30 minutos
         if ($this->usu_intentos_fallidos >= 5) {
             $this->update([
@@ -278,7 +286,7 @@ class Usuario extends Authenticatable
         if (!$this->usu_fecha_cambio_clave) {
             return true;
         }
-        
+
         return $this->usu_fecha_cambio_clave->diffInDays(now()) > 90;
     }
 

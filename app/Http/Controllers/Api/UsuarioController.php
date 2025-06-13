@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
@@ -103,6 +102,11 @@ class UsuarioController extends Controller
      */
     public function store(Request $request)
     {
+        // 🔍 Imprimir datos recibidos ANTES de validación
+        \Log::info("📧 Correo antes de validar:", ['email' => $request->input('usu_cor')]);
+        \Log::info("🔒 Contraseña antes de validar:", ['password' => $request->input('usu_con')]);
+
+
         $validator = Validator::make($request->all(), [
             'usu_nom' => 'required|string|max:100',
             'usu_nom2' => 'nullable|string|max:100',
@@ -136,8 +140,13 @@ class UsuarioController extends Controller
             ]);
             
             // Hashear la contraseña
+<<<<<<< Updated upstream
             $usuarioData['usu_con'] = Hash::make($request->usu_con);
             
+=======
+            $usuarioData['usu_con'] = $request->usu_con;
+
+>>>>>>> Stashed changes
             // Campos adicionales
             $usuarioData['usu_fecha_registro'] = Carbon::now();
             $usuarioData['usu_deshabilitado'] = false;
@@ -153,7 +162,15 @@ class UsuarioController extends Controller
                 // Si hay error con la autenticación, continuar sin asignar creador
             }
 
+            \Log::info("📧 Correo antes de guardar:", ['email' => $usuarioData['usu_cor']]);
+            \Log::info("🔒 Contraseña antes de guardar:", ['password' => $usuarioData['usu_con']]);
+
             $usuario = Usuario::create($usuarioData);
+
+            \Log::info("📥 Usuario creado con éxito:", [
+                'email' => $usuario->usu_cor,
+                'contraseña' => $usuario->usu_con
+            ]);
 
             // Obtener el usuario creado con relaciones
             $usuarioCompleto = $this->getUsuarioCompleto($usuario->usu_id);
@@ -253,7 +270,7 @@ class UsuarioController extends Controller
             
             // Si se proporciona nueva contraseña, hashearla
             if (!empty($request->usu_con)) {
-                $usuarioData['usu_con'] = Hash::make($request->usu_con);
+                $usuarioData['usu_con'] = ($request->usu_con);
             }
 
             $usuario->update($usuarioData);
@@ -380,7 +397,335 @@ class UsuarioController extends Controller
     /**
      * Change user password
      */
+<<<<<<< Updated upstream
     public function changePassword(Request $request, $id)
+=======
+    public function getPermissionsDetail($id)
+    {
+        try {
+            $usuario = Usuario::find($id);
+
+            if (!$usuario) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Usuario no encontrado',
+                    'data' => null
+                ], 404);
+            }
+
+            Log::info("🔍 Obteniendo permisos detallados para usuario {$id}");
+
+            // Obtener permisos del perfil del usuario desde tbl_perm_perfil
+            $permisosPerfil = DB::table('tbl_perm_perfil')
+                ->join('tbl_men', 'tbl_perm_perfil.men_id', '=', 'tbl_men.men_id')
+                ->leftJoin('tbl_sub', 'tbl_perm_perfil.sub_id', '=', 'tbl_sub.sub_id')
+                ->leftJoin('tbl_opc', 'tbl_perm_perfil.opc_id', '=', 'tbl_opc.opc_id')
+                ->leftJoin('tbl_ico as ico_men', 'tbl_men.ico_id', '=', 'ico_men.ico_id')
+                ->leftJoin('tbl_ico as ico_sub', 'tbl_sub.ico_id', '=', 'ico_sub.ico_id')
+                ->leftJoin('tbl_ico as ico_opc', 'tbl_opc.ico_id', '=', 'ico_opc.ico_id')
+                ->where('tbl_perm_perfil.per_id', $usuario->per_id)
+                ->where('tbl_perm_perfil.perm_per_activo', true)
+                ->where('tbl_men.men_activo', true)
+                ->select(
+                    'tbl_perm_perfil.men_id',
+                    'tbl_perm_perfil.sub_id',
+                    'tbl_perm_perfil.opc_id',
+                    'tbl_men.men_nom',
+                    'tbl_men.men_componente',
+                    'ico_men.ico_nom as men_icon_nombre',
+                    'tbl_sub.sub_nom',
+                    'tbl_sub.sub_componente',
+                    'tbl_sub.sub_activo',
+                    'ico_sub.ico_nom as sub_icon_nombre',
+                    'tbl_opc.opc_nom',
+                    'tbl_opc.opc_componente',
+                    'tbl_opc.opc_activo',
+                    'ico_opc.ico_nom as opc_icon_nombre'
+                )
+                ->get();
+
+            // ✅ SIMPLIFICADO: Obtener permisos individuales usando solo tbl_usu_perm
+            $permisosUsuario = DB::table('tbl_usu_perm')
+                ->where('usu_id', $id)
+                ->get();
+
+            Log::info("📊 Permisos encontrados: perfil={$permisosPerfil->count()}, usuario={$permisosUsuario->count()}");
+
+            // Crear un Set de permisos que el usuario tiene activos
+            $permisosActivosUsuario = $permisosUsuario->mapWithKeys(function ($item) {
+                $key = $item->men_id . '-' . ($item->sub_id ?? 'null') . '-' . ($item->opc_id ?? 'null');
+                return [$key => true];
+            });
+
+            // Organizar permisos del perfil en estructura de árbol
+            $menuTree = [];
+
+            foreach ($permisosPerfil as $item) {
+                $permisoKey = $item->men_id . '-' . ($item->sub_id ?? 'null') . '-' . ($item->opc_id ?? 'null');
+                $usuarioTienePermiso = isset($permisosActivosUsuario[$permisoKey]);
+
+                // Crear menú si no existe
+                if (!isset($menuTree[$item->men_id])) {
+                    $menuTree[$item->men_id] = [
+                        'men_id' => $item->men_id,
+                        'men_nom' => $item->men_nom,
+                        'men_componente' => $item->men_componente,
+                        'ico_nombre' => $item->men_icon_nombre,
+                        'has_permission' => $item->sub_id === null && $item->opc_id === null ? $usuarioTienePermiso : false,
+                        'submenus' => []
+                    ];
+                }
+
+                // Agregar submenú si existe y está activo
+                if ($item->sub_id && $item->sub_activo) {
+                    $submenuKey = $item->sub_id;
+
+                    if (!isset($menuTree[$item->men_id]['submenus'][$submenuKey])) {
+                        $menuTree[$item->men_id]['submenus'][$submenuKey] = [
+                            'sub_id' => $item->sub_id,
+                            'sub_nom' => $item->sub_nom,
+                            'sub_componente' => $item->sub_componente,
+                            'ico_nombre' => $item->sub_icon_nombre,
+                            'has_permission' => $item->opc_id === null ? $usuarioTienePermiso : false,
+                            'opciones' => []
+                        ];
+                    }
+
+                    // Agregar opción si existe y está activa
+                    if ($item->opc_id && $item->opc_activo) {
+                        $menuTree[$item->men_id]['submenus'][$submenuKey]['opciones'][] = [
+                            'opc_id' => $item->opc_id,
+                            'opc_nom' => $item->opc_nom,
+                            'opc_componente' => $item->opc_componente,
+                            'ico_nombre' => $item->opc_icon_nombre,
+                            'has_permission' => $usuarioTienePermiso
+                        ];
+                    }
+                }
+            }
+
+            // Convertir submenus de asociativo a indexado
+            foreach ($menuTree as &$menu) {
+                $menu['submenus'] = array_values($menu['submenus']);
+            }
+
+            Log::info("✅ Estructura de permisos construida exitosamente");
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Permisos del usuario obtenidos correctamente',
+                'data' => [
+                    'usuario' => [
+                        'usu_id' => $usuario->usu_id,
+                        'nombre_completo' => trim("{$usuario->usu_nom} {$usuario->usu_nom2} {$usuario->usu_ape} {$usuario->usu_ape2}"),
+                        'usu_cor' => $usuario->usu_cor,
+                        'per_id' => $usuario->per_id
+                    ],
+                    'permisos' => array_values($menuTree),
+                    'permisos_usuario_activos' => $permisosUsuario->count(),
+                    'total_permisos_disponibles' => $permisosPerfil->count()
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error("❌ Error en getPermissionsDetail: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al obtener permisos del usuario: ' . $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * OPCIONAL: Método para limpiar registros problemáticos de tbl_perm_usuario
+     */
+    public function cleanupBrokenPermissions()
+    {
+        try {
+            // Contar registros problemáticos
+            $brokenCount = DB::table('tbl_perm_usuario')
+                ->where('perm_tipo', 'NOT IN', DB::raw("('C'::bpchar, 'D'::bpchar)"))
+                ->count();
+
+            Log::info("🧹 Encontrados {$brokenCount} registros problemáticos en tbl_perm_usuario");
+
+            if ($brokenCount > 0) {
+                // Opcional: Eliminar registros problemáticos
+                // DB::table('tbl_perm_usuario')
+                //     ->where('perm_tipo', 'NOT IN', DB::raw("('C'::bpchar, 'D'::bpchar)"))
+                //     ->delete();
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Encontrados {$brokenCount} registros problemáticos",
+                'broken_records' => $brokenCount
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    /**
+     * ✅ RESTAURAR: Endpoin
+     *  para obtener permisos (para AsgiPerUsWindows)
+     */
+    public function getPermissions($id)
+    {
+        return $this->getPermissionsDetail($id);
+    }
+
+    /**
+     * Asignar permisos específicos a un usuario
+     */
+    public function assignPermissions(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'permissions' => 'required|array',
+            'permissions.*.men_id' => 'required|integer|exists:tbl_men,men_id',
+            'permissions.*.sub_id' => 'nullable|integer|exists:tbl_sub,sub_id',
+            'permissions.*.opc_id' => 'nullable|integer|exists:tbl_opc,opc_id',
+            'permissions.*.grant' => 'required|boolean'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Datos de validación incorrectos',
+                'errors' => $validator->errors(),
+                'data' => null
+            ], 422);
+        }
+
+        try {
+            $usuario = Usuario::find($id);
+
+            if (!$usuario) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Usuario no encontrado',
+                    'data' => null
+                ], 404);
+            }
+
+            Log::info("🔧 Iniciando asignación de permisos para usuario {$id}");
+
+            DB::beginTransaction();
+
+            $processedCount = 0;
+            $errores = [];
+
+            foreach ($request->permissions as $permission) {
+                try {
+                    $menId = $permission['men_id'];
+                    $subId = $permission['sub_id'];
+                    $opcId = $permission['opc_id'];
+                    $grant = $permission['grant'];
+
+                    Log::info("🔍 Procesando permiso: menú={$menId}, sub={$subId}, opc={$opcId}, grant={$grant}");
+
+                    // ✅ SIMPLIFICADO: Verificar que el permiso esté disponible en el perfil del usuario
+                    $perfilHasPermission = DB::table('tbl_perm_perfil')
+                        ->where('per_id', $usuario->per_id)
+                        ->where('men_id', $menId)
+                        ->where(function ($query) use ($subId) {
+                            if ($subId !== null) {
+                                $query->where('sub_id', $subId);
+                            } else {
+                                $query->whereNull('sub_id');
+                            }
+                        })
+                        ->where(function ($query) use ($opcId) {
+                            if ($opcId !== null) {
+                                $query->where('opc_id', $opcId);
+                            } else {
+                                $query->whereNull('opc_id');
+                            }
+                        })
+                        ->where('perm_per_activo', true)
+                        ->exists();
+
+                    if (!$perfilHasPermission) {
+                        $errores[] = "Permiso no disponible en perfil para menú {$menId}";
+                        Log::warning("⚠️ Permiso no disponible en perfil: menú={$menId}, sub={$subId}, opc={$opcId}");
+                        continue;
+                    }
+
+                    // ✅ USAR SOLO TBL_USU_PERM - es más simple y funcional
+                    $userPermissionData = [
+                        'usu_id' => $id,
+                        'men_id' => $menId,
+                        'sub_id' => $subId,
+                        'opc_id' => $opcId
+                    ];
+
+                    // Verificar si ya existe este permiso específico para el usuario
+                    $existingUserPermission = DB::table('tbl_usu_perm')
+                        ->where($userPermissionData)
+                        ->exists();
+
+                    if ($grant && !$existingUserPermission) {
+                        // ✅ OTORGAR PERMISO: Insertar en tbl_usu_perm
+                        $userPermissionData['created_at'] = now();
+
+                        DB::table('tbl_usu_perm')->insert($userPermissionData);
+                        $processedCount++;
+                        Log::info("✅ Permiso otorgado: menú={$menId}, sub={$subId}, opc={$opcId}");
+                    } elseif (!$grant && $existingUserPermission) {
+                        // ✅ REVOCAR PERMISO: Eliminar de tbl_usu_perm
+                        DB::table('tbl_usu_perm')->where($userPermissionData)->delete();
+                        $processedCount++;
+                        Log::info("✅ Permiso revocado: menú={$menId}, sub={$subId}, opc={$opcId}");
+                    }
+                } catch (\Exception $e) {
+                    $errores[] = "Error procesando permiso menú {$menId}: " . $e->getMessage();
+                    Log::error("❌ Error procesando permiso: " . $e->getMessage());
+                }
+            }
+
+            DB::commit();
+
+            $mensaje = "Se procesaron {$processedCount} cambios de permisos correctamente";
+            if (!empty($errores) && $processedCount === 0) {
+                $mensaje = "No se procesaron cambios. Errores: " . implode(', ', array_slice($errores, 0, 2));
+            } elseif (!empty($errores)) {
+                $mensaje .= ". Algunos errores: " . implode(', ', array_slice($errores, 0, 1));
+            }
+
+            Log::info("✅ Asignación de permisos completada: {$processedCount} cambios procesados");
+
+            return response()->json([
+                'status' => $processedCount > 0 ? 'success' : 'warning',
+                'message' => $mensaje,
+                'data' => [
+                    'changes_processed' => $processedCount,
+                    'errors' => $errores,
+                    'usuario_id' => $id,
+                    'perfil_id' => $usuario->per_id,
+                    'total_permissions_attempted' => count($request->permissions)
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("❌ Error general en assignPermissions: " . $e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al asignar permisos: ' . $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener permisos activos de un usuario (combinando perfil + individuales)
+     */
+    public function getActivePermissions($id)
+>>>>>>> Stashed changes
     {
         try {
             $validator = Validator::make($request->all(), [

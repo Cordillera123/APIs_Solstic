@@ -510,6 +510,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // === GESTIÓN DE USUARIOS ===
     Route::apiResource('usuarios', UsuarioController::class);
     Route::put('/usuarios/{id}/toggle-status', [UsuarioController::class, 'toggleStatus']);
+    Route::patch('/usuarios/{id}/reactivate', [UsuarioController::class, 'reactivate']);
     Route::post('/usuarios/{id}/change-password', [UsuarioController::class, 'changePassword']);
     Route::post('/usuarios/{id}/reset-password', [UsuarioController::class, 'resetPassword']);
     Route::get('/usuarios/{id}/permissions', [UsuarioController::class, 'getUserPermissions']);

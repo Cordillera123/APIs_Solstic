@@ -521,11 +521,21 @@ class ComposerStaticInit85c1d2065f70e38b0d6bf66559fb13c5
     );
 
     public static $classMap = array (
+        'App\\Http\\Controllers\\Api\\ButtonController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ButtonController.php',
+        'App\\Http\\Controllers\\Api\\ButtonPermissionController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ButtonPermissionController.php',
+        'App\\Http\\Controllers\\Api\\DirectModulesController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/DirectModulesController.php',
+        'App\\Http\\Controllers\\Api\\MenuButtonPermissionsController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/MenuButtonPermissionsController.php',
+        'App\\Http\\Controllers\\Api\\UserButtonPermissionController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/UserButtonPermissionController.php',
         'App\\Http\\Controllers\\Controller' => __DIR__ . '/../..' . '/app/Http/Controllers/Controller.php',
+        'App\\Models\\Button' => __DIR__ . '/../..' . '/app/Models/Button.php',
+        'App\\Models\\ButtonPermissionProfile' => __DIR__ . '/../..' . '/app/Models/ButtonPermissionProfile.php',
+        'App\\Models\\ButtonPermissionUser' => __DIR__ . '/../..' . '/app/Models/ButtonPermissionUser.php',
+        'App\\Models\\Config' => __DIR__ . '/../..' . '/app/Models/Config.php',
         'App\\Models\\Estado' => __DIR__ . '/../..' . '/app/Models/Estado.php',
         'App\\Models\\Menu' => __DIR__ . '/../..' . '/app/Models/Menu.php',
         'App\\Models\\Opcion' => __DIR__ . '/../..' . '/app/Models/Opcion.php',
         'App\\Models\\Option' => __DIR__ . '/../..' . '/app/Models/Option.php',
+        'App\\Models\\OptionButton' => __DIR__ . '/../..' . '/app/Models/OptionButton.php',
         'App\\Models\\Perfil' => __DIR__ . '/../..' . '/app/Models/Perfil.php',
         'App\\Models\\Permiso' => __DIR__ . '/../..' . '/app/Models/Permiso.php',
         'App\\Models\\Submenu' => __DIR__ . '/../..' . '/app/Models/Submenu.php',

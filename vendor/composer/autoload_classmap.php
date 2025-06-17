@@ -6,11 +6,21 @@ $vendorDir = dirname(__DIR__);
 $baseDir = dirname($vendorDir);
 
 return array(
+    'App\\Http\\Controllers\\Api\\ButtonController' => $baseDir . '/app/Http/Controllers/Api/ButtonController.php',
+    'App\\Http\\Controllers\\Api\\ButtonPermissionController' => $baseDir . '/app/Http/Controllers/Api/ButtonPermissionController.php',
+    'App\\Http\\Controllers\\Api\\DirectModulesController' => $baseDir . '/app/Http/Controllers/Api/DirectModulesController.php',
+    'App\\Http\\Controllers\\Api\\MenuButtonPermissionsController' => $baseDir . '/app/Http/Controllers/Api/MenuButtonPermissionsController.php',
+    'App\\Http\\Controllers\\Api\\UserButtonPermissionController' => $baseDir . '/app/Http/Controllers/Api/UserButtonPermissionController.php',
     'App\\Http\\Controllers\\Controller' => $baseDir . '/app/Http/Controllers/Controller.php',
+    'App\\Models\\Button' => $baseDir . '/app/Models/Button.php',
+    'App\\Models\\ButtonPermissionProfile' => $baseDir . '/app/Models/ButtonPermissionProfile.php',
+    'App\\Models\\ButtonPermissionUser' => $baseDir . '/app/Models/ButtonPermissionUser.php',
+    'App\\Models\\Config' => $baseDir . '/app/Models/Config.php',
     'App\\Models\\Estado' => $baseDir . '/app/Models/Estado.php',
     'App\\Models\\Menu' => $baseDir . '/app/Models/Menu.php',
     'App\\Models\\Opcion' => $baseDir . '/app/Models/Opcion.php',
     'App\\Models\\Option' => $baseDir . '/app/Models/Option.php',
+    'App\\Models\\OptionButton' => $baseDir . '/app/Models/OptionButton.php',
     'App\\Models\\Perfil' => $baseDir . '/app/Models/Perfil.php',
     'App\\Models\\Permiso' => $baseDir . '/app/Models/Permiso.php',
     'App\\Models\\Submenu' => $baseDir . '/app/Models/Submenu.php',

@@ -1,19 +1,19 @@
 <?php
 
-use App\Http\Controllers\API\AuthController;
-use App\Http\Controllers\API\IconController;
-use App\Http\Controllers\API\MenuController;
-use App\Http\Controllers\API\SubmenuController;
-use App\Http\Controllers\API\OptionController;
-use App\Http\Controllers\API\UsuarioController;
-use App\Http\Controllers\API\PermissionsController;
-use App\Http\Controllers\API\PerfilController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\IconController;
+use App\Http\Controllers\Api\MenuController;
+use App\Http\Controllers\Api\SubmenuController;
+use App\Http\Controllers\Api\OptionController;
+use App\Http\Controllers\Api\UsuarioController;
+use App\Http\Controllers\Api\PermissionsController;
+use App\Http\Controllers\Api\PerfilController;
 use App\Http\Controllers\Api\DirectModulesController;
-use App\Http\Controllers\API\EstadoController;
-use App\Http\Controllers\API\ConfigController;
-use App\Http\Controllers\API\ButtonController;
-use App\Http\Controllers\API\ButtonPermissionController;
-use App\Http\Controllers\API\MenuButtonPermissionsController;
+use App\Http\Controllers\Api\EstadoController;
+use App\Http\Controllers\Api\ConfigController;
+use App\Http\Controllers\Api\ButtonController;
+use App\Http\Controllers\Api\ButtonPermissionController;
+use App\Http\Controllers\Api\MenuButtonPermissionsController;
 use App\Http\Controllers\Api\UserButtonPermissionController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\DB;

@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\ButtonPermissionController;
 use App\Http\Controllers\Api\MenuButtonPermissionsController;
 use App\Http\Controllers\Api\UserButtonPermissionController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\TipoOficinaController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -533,8 +534,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/perfiles/{perfil_id}/asignar-permisos-basicos', [PermissionsController::class, 'asignarPermisosBasicosVentanasDirectas']);
     // === GESTIÓN DE ESTADOS ===
     Route::apiResource('estados', EstadoController::class);
-
-
+    // === GESTIÓN DE TIPOS DE OFICINA ===
+    Route::prefix('tipos-oficina')->group(function () {
+    Route::get('/', [TipoOficinaController::class, 'index']);
+    Route::post('/', [TipoOficinaController::class, 'store']);
+    Route::get('/activos', [TipoOficinaController::class, 'activos']);
+    Route::get('/{id}', [TipoOficinaController::class, 'show']);
+    Route::put('/{id}', [TipoOficinaController::class, 'update']);
+    Route::delete('/{id}', [TipoOficinaController::class, 'destroy']);
+});
     // === GESTIÓN DE PERMISOS DE BOTONES POR USUARIO ===
     Route::get('/user-button-permissions/profiles/{perfilId}/users', [UserButtonPermissionController::class, 'getUsersByProfile']);
     Route::get('/user-button-permissions/users/{usuarioId}', [UserButtonPermissionController::class, 'getUserButtonPermissions']);

@@ -14,124 +14,110 @@ use Illuminate\Support\Facades\Hash;
 
 class UsuarioController extends Controller
 {
+    
     /**
-     * Display a listing of the resource.
-     * ✅ CORRECCIÓN: Asegurar estructura consistente de respuesta
+    * Listar Usuarios con Empresas
      */
-        /**
-     * Display a listing of the resource.
-     * ✅ CORREGIDO: Manejo correcto del parámetro incluir_deshabilitados
-     */
-    public function index(Request $request)
-    {
-        try {
-            $perPage = $request->get('per_page', 15);
-            $search = $request->get('search', '');
-            $perfilId = $request->get('per_id', ''); 
-            $estadoId = $request->get('estado_id', '');
-            $incluirDeshabilitados = $request->boolean('incluir_deshabilitados', false);
+public function index(Request $request)
+{
+    try {
+        $perPage = $request->get('per_page', 15);
+        $search = $request->get('search', '');
+        $perfilId = $request->get('per_id', ''); 
+        $estadoId = $request->get('estado_id', '');
+        $oficinaCodigo = $request->get('oficina_codigo', ''); // ✅ FILTRO OFICINA
+        $sinOficina = $request->boolean('sin_oficina', false); // ✅ FILTRO SIN OFICINA
+        $incluirDeshabilitados = $request->boolean('incluir_deshabilitados', false);
 
-            Log::info("🔍 Parámetros recibidos en index:", [
-                'per_page' => $perPage,
-                'search' => $search,
-                'per_id' => $perfilId,
-                'estado_id' => $estadoId,
-                'incluir_deshabilitados' => $incluirDeshabilitados
-            ]);
+        $query = DB::table('tbl_usu')
+            ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
+            ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
+            ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo') // ✅ CORREGIDO
+            ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo') // ✅ CORREGIDO
+            ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo') // ✅ CORREGIDO
+            ->leftJoin('tbl_usu as creador', 'tbl_usu.usu_creado_por', '=', 'creador.usu_id')
+            ->select(
+                'tbl_usu.usu_id',
+                'tbl_usu.usu_nom',
+                'tbl_usu.usu_nom2',
+                'tbl_usu.usu_ape',
+                'tbl_usu.usu_ape2',
+                'tbl_usu.usu_cor',
+                'tbl_usu.usu_ced',
+                'tbl_usu.usu_tel',
+                'tbl_usu.usu_dir',
+                'tbl_usu.usu_descripcion',
+                'tbl_usu.usu_fecha_nacimiento',
+                'tbl_usu.usu_fecha_registro',
+                'tbl_usu.usu_ultimo_acceso',
+                'tbl_usu.usu_intentos_fallidos',
+                'tbl_usu.usu_bloqueado_hasta',
+                'tbl_usu.usu_deshabilitado',
+                'tbl_per.per_nom as perfil',
+                'tbl_est.est_nom as estado',
+                'tbl_usu.per_id',
+                'tbl_usu.est_id',
+                'creador.usu_nom as creado_por_nombre',
+                'tbl_usu.usu_cre',
+                'tbl_usu.usu_edi',
+                // ✅ CAMPOS DE OFICINA CORREGIDOS
+                'tbl_usu.oficin_codigo',
+                'gaf_oficin.oficin_nombre as oficina_nombre',
+                'gaf_tofici.tofici_descripcion as tipo_oficina',
+                'gaf_instit.instit_nombre as institucion',
+                DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
+            );
 
-            $query = DB::table('tbl_usu')
-                ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
-                ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-                ->leftJoin('tbl_usu as creador', 'tbl_usu.usu_creado_por', '=', 'creador.usu_id')
-                ->select(
-                    'tbl_usu.usu_id',
-                    'tbl_usu.usu_nom',
-                    'tbl_usu.usu_nom2',
-                    'tbl_usu.usu_ape',
-                    'tbl_usu.usu_ape2',
-                    'tbl_usu.usu_cor',
-                    'tbl_usu.usu_ced',
-                    'tbl_usu.usu_tel',
-                    'tbl_usu.usu_dir',
-                    'tbl_usu.usu_descripcion',
-                    'tbl_usu.usu_fecha_nacimiento',
-                    'tbl_usu.usu_fecha_registro',
-                    'tbl_usu.usu_ultimo_acceso',
-                    'tbl_usu.usu_intentos_fallidos',
-                    'tbl_usu.usu_bloqueado_hasta',
-                    'tbl_usu.usu_deshabilitado',
-                    'tbl_per.per_nom as perfil',
-                    'tbl_est.est_nom as estado',
-                    'tbl_usu.per_id',
-                    'tbl_usu.est_id',
-                    'creador.usu_nom as creado_por_nombre',
-                    'tbl_usu.usu_cre',
-                    'tbl_usu.usu_edi',
-                    DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
-                );
-
-            // ✅ FILTRO POR DESHABILITADOS
-            if (!$incluirDeshabilitados) {
-                $query->where('tbl_usu.usu_deshabilitado', false);
-                Log::info("🔍 Filtro aplicado: Solo usuarios habilitados");
-            } else {
-                Log::info("🔍 Filtro aplicado: Incluyendo usuarios deshabilitados");
-            }
-
-            // Otros filtros
-            if (!empty($search)) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('tbl_usu.usu_nom', 'ILIKE', "%{$search}%")
-                        ->orWhere('tbl_usu.usu_ape', 'ILIKE', "%{$search}%")
-                        ->orWhere('tbl_usu.usu_cor', 'ILIKE', "%{$search}%")
-                        ->orWhere('tbl_usu.usu_ced', 'ILIKE', "%{$search}%")
-                        ->orWhere('tbl_per.per_nom', 'ILIKE', "%{$search}%");
-                });
-            }
-
-            if (!empty($perfilId)) {
-                $query->where('tbl_usu.per_id', $perfilId);
-            }
-
-            if (!empty($estadoId)) {
-                $query->where('tbl_usu.est_id', $estadoId);
-            }
-
-            $usuarios = $query->orderBy('tbl_usu.usu_fecha_registro', 'desc')
-                ->paginate($perPage);
-
-            Log::info("✅ Usuarios obtenidos:", [
-                'total' => $usuarios->total(),
-                'current_page' => $usuarios->currentPage(),
-                'per_page' => $usuarios->perPage()
-            ]);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Usuarios obtenidos correctamente',
-                'data' => $usuarios,
-                'debug_info' => [
-                    'total_usuarios' => $usuarios->total(),
-                    'pagina_actual' => $usuarios->currentPage(),
-                    'per_page' => $usuarios->perPage(),
-                    'incluir_deshabilitados' => $incluirDeshabilitados,
-                    'filtros_aplicados' => [
-                        'search' => $search,
-                        'per_id' => $perfilId,
-                        'estado_id' => $estadoId
-                    ]
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error("❌ Error en index usuarios: " . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error al obtener usuarios: ' . $e->getMessage(),
-                'data' => null
-            ], 500);
+        // Filtros
+        if (!$incluirDeshabilitados) {
+            $query->where('tbl_usu.usu_deshabilitado', false);
         }
+
+        if (!empty($oficinaCodigo)) {
+            $query->where('tbl_usu.oficin_codigo', $oficinaCodigo);
+        }
+
+        if ($sinOficina) {
+            $query->whereNull('tbl_usu.oficin_codigo');
+        }
+
+        if (!empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('tbl_usu.usu_nom', 'ILIKE', "%{$search}%")
+                    ->orWhere('tbl_usu.usu_ape', 'ILIKE', "%{$search}%")
+                    ->orWhere('tbl_usu.usu_cor', 'ILIKE', "%{$search}%")
+                    ->orWhere('tbl_usu.usu_ced', 'ILIKE', "%{$search}%")
+                    ->orWhere('tbl_per.per_nom', 'ILIKE', "%{$search}%")
+                    ->orWhere('gaf_oficin.oficin_nombre', 'ILIKE', "%{$search}%"); // ✅ CORREGIDO
+            });
+        }
+
+        if (!empty($perfilId)) {
+            $query->where('tbl_usu.per_id', $perfilId);
+        }
+
+        if (!empty($estadoId)) {
+            $query->where('tbl_usu.est_id', $estadoId);
+        }
+
+        $usuarios = $query->orderBy('tbl_usu.usu_fecha_registro', 'desc')
+            ->paginate($perPage);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Usuarios obtenidos correctamente',
+            'data' => $usuarios
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error("❌ Error en index usuarios: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al obtener usuarios: ' . $e->getMessage(),
+            'data' => null
+        ], 500);
     }
+}
 
     /**
      * Display the specified resource.
@@ -176,102 +162,120 @@ class UsuarioController extends Controller
  */
 public function store(Request $request)
 {
-    $validator = Validator::make($request->all(), [
-        'usu_nom' => 'required|string|max:100',
-        'usu_nom2' => 'nullable|string|max:100',
-        'usu_ape' => 'required|string|max:100',
-        'usu_ape2' => 'nullable|string|max:100',
-        'usu_cor' => 'required|email|unique:tbl_usu,usu_cor|max:100',
-        'usu_ced' => 'required|string|unique:tbl_usu,usu_ced|max:10',
-        'usu_con' => 'required|string|min:6|max:64',
-        'usu_tel' => 'nullable|string|max:10',
-        'usu_dir' => 'nullable|string|max:100',
-        'per_id' => 'required|integer|exists:tbl_per,per_id',
-        'est_id' => 'required|integer|exists:tbl_est,est_id',
-        'usu_descripcion' => 'nullable|string',
-        'usu_fecha_nacimiento' => 'nullable|date|before:today'
-    ]);
-
-    if ($validator->fails()) {
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Datos de validación incorrectos',
-            'errors' => $validator->errors(),
-            'data' => null
-        ], 422);
-    }
-
     try {
-        DB::beginTransaction();
-
-        // ✅ PREPARAR DATOS DEL USUARIO - DENTRO DE LA FUNCIÓN
-        $usuarioData = $request->only([
-            'usu_nom',
-            'usu_nom2',
-            'usu_ape',
-            'usu_ape2',
-            'usu_cor',
-            'usu_ced',
-            'usu_tel',
-            'usu_dir',
-            'per_id',
-            'est_id',
-            'usu_descripcion',
-            'usu_fecha_nacimiento'
+        Log::info("👤 Intentando crear usuario con email: " . $request->get('usu_cor', 'N/A'));
+        
+        $validator = Validator::make($request->all(), [
+            'usu_nom' => 'required|string|max:100',
+            'usu_nom2' => 'nullable|string|max:100',
+            'usu_ape' => 'required|string|max:100',
+            'usu_ape2' => 'nullable|string|max:100',
+            'usu_cor' => 'required|email|unique:tbl_usu,usu_cor|max:100',
+            'usu_ced' => 'required|string|unique:tbl_usu,usu_ced|max:10',
+            'usu_con' => 'required|string|min:6|max:64',
+            'usu_tel' => 'nullable|string|max:10',
+            'usu_dir' => 'nullable|string|max:100',
+            'per_id' => 'required|integer|exists:tbl_per,per_id',
+            'est_id' => 'required|integer|exists:tbl_est,est_id',
+            'oficin_codigo' => 'nullable|integer|exists:gaf_oficin,oficin_codigo',
+            'usu_descripcion' => 'nullable|string',
+            'usu_fecha_nacimiento' => 'nullable|date|before:today'
         ]);
 
-        // ✅ ASIGNAR CONTRASEÑA (el hasheo se hace en otro lugar)
-        $usuarioData['usu_con'] = $request->usu_con;
+        if ($validator->fails()) {
+            Log::warning("❌ Validación fallida para usuario: " . json_encode($validator->errors()));
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Datos de validación incorrectos',
+                'errors' => $validator->errors(),
+                'data' => null
+            ], 422);
+        }
 
-        // Campos adicionales
+        DB::beginTransaction();
+
+        $usuarioData = $request->only([
+            'usu_nom', 'usu_nom2', 'usu_ape', 'usu_ape2', 'usu_cor',
+            'usu_ced', 'usu_tel', 'usu_dir', 'per_id', 'est_id',
+            'oficin_codigo', 'usu_descripcion', 'usu_fecha_nacimiento'
+        ]);
+
+        $usuarioData['usu_con'] = $request->usu_con;
         $usuarioData['usu_fecha_registro'] = Carbon::now();
         $usuarioData['usu_deshabilitado'] = false;
         $usuarioData['usu_intentos_fallidos'] = 0;
         $usuarioData['usu_cre'] = Carbon::now();
 
-        // Si hay un usuario autenticado, asignar como creador
         try {
             if (Auth::check() && Auth::user()) {
                 $usuarioData['usu_creado_por'] = Auth::user()->usu_id;
                 $usuarioData['usu_editado_por'] = Auth::user()->usu_id;
+                Log::info("📝 Usuario creado por: " . Auth::user()->usu_id);
+            } else {
+                Log::info("📝 Usuario creado sin autenticación");
             }
         } catch (\Exception $e) {
-            // Si hay error con la autenticación, continuar sin asignar creador
+            Log::warning("⚠️ No se pudo obtener usuario autenticado: " . $e->getMessage());
         }
 
-        Log::info("📧 Creando usuario:", ['email' => $usuarioData['usu_cor']]);
-
-        $usuario = Usuario::create($usuarioData);
-
-        Log::info("📥 Usuario creado con éxito:", [
-            'id' => $usuario->usu_id,
-            'email' => $usuario->usu_cor
+        Log::info("📧 Datos preparados para crear usuario:", [
+            'email' => $usuarioData['usu_cor'],
+            'oficina' => $usuarioData['oficin_codigo'] ?? 'Sin asignar'
         ]);
 
-        // Obtener el usuario creado con relaciones
+        $usuario = Usuario::create($usuarioData);
+        
+        Log::info("✅ Usuario creado con ID: " . $usuario->usu_id);
+
         $usuarioCompleto = $this->getUsuarioCompleto($usuario->usu_id);
+
+        if (!$usuarioCompleto) {
+            throw new \Exception("No se pudo obtener la información completa del usuario creado");
+        }
 
         DB::commit();
 
-        // ✅ ESTRUCTURA DE RESPUESTA CONSISTENTE
+        Log::info("🎉 Usuario creado exitosamente: {$usuario->usu_id} - {$usuarioData['usu_cor']}");
+
         return response()->json([
             'status' => 'success',
             'message' => 'Usuario creado exitosamente',
             'data' => $usuarioCompleto
         ], 201);
 
+    } catch (\Illuminate\Database\QueryException $e) {
+        DB::rollBack();
+        Log::error("❌ Error de base de datos creando usuario: " . $e->getMessage());
+        Log::error("❌ SQL Error Info: " . json_encode($e->errorInfo));
+        
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error de base de datos al crear usuario',
+            'data' => [
+                'error_code' => $e->getCode(),
+                'sql_state' => $e->errorInfo[0] ?? null,
+                'error_detail' => $e->errorInfo[2] ?? null
+            ]
+        ], 500);
+        
     } catch (\Exception $e) {
         DB::rollBack();
-        Log::error("❌ Error creando usuario: " . $e->getMessage());
+        Log::error("❌ Error general creando usuario: " . $e->getMessage());
+        Log::error("❌ Archivo: " . $e->getFile() . " Línea: " . $e->getLine());
+        Log::error("❌ Trace: " . $e->getTraceAsString());
 
         return response()->json([
             'status' => 'error',
-            'message' => 'Error al crear usuario: ' . $e->getMessage(),
-            'data' => null
+            'message' => 'Error interno del servidor al crear usuario',
+            'data' => [
+                'error_type' => get_class($e),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile()),
+                'message' => $e->getMessage()
+            ]
         ], 500);
     }
 }
-
 /**
  * ✅ MÉTODO DESTROY CORREGIDO - Implementar eliminado lógico
  */
@@ -406,11 +410,7 @@ public function reactivate($id)
         ], 500);
     }
 }
-    /**
-     * Update the specified resource in storage.
-     * ✅ CORRECCIÓN: Mejorar validación y respuesta
-     */
-    /**
+  /*
  * Update the specified resource in storage.
  * ✅ CORREGIDO: Sin hasheo de contraseña
  */
@@ -438,6 +438,7 @@ public function update(Request $request, $id)
         'usu_dir' => 'nullable|string|max:100',
         'per_id' => 'sometimes|required|integer|exists:tbl_per,per_id',
         'est_id' => 'sometimes|required|integer|exists:tbl_est,est_id',
+        'oficin_codigo' => 'nullable|integer|exists:gaf_oficin,oficin_codigo', // ✅ CORREGIDO
         'usu_descripcion' => 'nullable|string',
         'usu_fecha_nacimiento' => 'nullable|date|before:today'
     ]);
@@ -455,50 +456,43 @@ public function update(Request $request, $id)
         DB::beginTransaction();
 
         $usuarioData = $request->only([
-            'usu_nom',
-            'usu_nom2',
-            'usu_ape',
-            'usu_ape2',
-            'usu_cor',
-            'usu_ced',
-            'usu_tel',
-            'usu_dir',
-            'per_id',
-            'est_id',
-            'usu_descripcion',
-            'usu_fecha_nacimiento'
+            'usu_nom', 'usu_nom2', 'usu_ape', 'usu_ape2', 'usu_cor',
+            'usu_ced', 'usu_tel', 'usu_dir', 'per_id', 'est_id',
+            'oficin_codigo', 'usu_descripcion', 'usu_fecha_nacimiento'
         ]);
 
-        // ✅ ASIGNAR CONTRASEÑA SIN HASHEAR (se hace en otro lugar)
         if (!empty($request->usu_con)) {
             $usuarioData['usu_con'] = $request->usu_con;
         }
 
-        // ✅ AGREGAR FECHA DE EDICIÓN
         $usuarioData['usu_edi'] = Carbon::now();
 
-        // Si hay usuario autenticado, registrar quién editó
         try {
             if (Auth::check() && Auth::user()) {
                 $usuarioData['usu_editado_por'] = Auth::user()->usu_id;
             }
         } catch (\Exception $e) {
-            // Continuar sin registrar editor si hay error
+            // Continuar sin registrar editor
+        }
+
+        // Log de cambio de oficina
+        if (isset($usuarioData['oficin_codigo']) && $usuario->oficin_codigo != $usuarioData['oficin_codigo']) {
+            Log::info("🏢 Cambio de oficina detectado:", [
+                'usuario_id' => $id,
+                'oficina_anterior' => $usuario->oficin_codigo,
+                'oficina_nueva' => $usuarioData['oficin_codigo']
+            ]);
         }
 
         $usuario->update($usuarioData);
-
-        // Obtener el usuario actualizado con relaciones
         $usuarioCompleto = $this->getUsuarioCompleto($id);
 
-        // Ocultar contraseña en la respuesta
         if (isset($usuarioCompleto->usu_con)) {
             unset($usuarioCompleto->usu_con);
         }
 
         DB::commit();
 
-        // ✅ ESTRUCTURA DE RESPUESTA CONSISTENTE
         return response()->json([
             'status' => 'success',
             'message' => 'Usuario actualizado exitosamente',
@@ -516,7 +510,170 @@ public function update(Request $request, $id)
         ], 500);
     }
 }
+public function asignarOficina(Request $request, $id)
+{
+    try {
+        Log::info("🏢 Intentando asignar oficina al usuario ID: {$id}");
+        
+        $validator = Validator::make($request->all(), [
+            'oficin_codigo' => 'required|integer|exists:gaf_oficin,oficin_codigo',
+            'motivo' => 'nullable|string|max:200'
+        ]);
 
+        if ($validator->fails()) {
+            Log::warning("❌ Validación fallida para asignar oficina usuario {$id}: " . json_encode($validator->errors()));
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Datos de validación incorrectos',
+                'errors' => $validator->errors(),
+                'data' => null
+            ], 422);
+        }
+
+        $usuario = Usuario::find($id);
+
+        if (!$usuario) {
+            Log::warning("❌ Usuario no encontrado: ID {$id}");
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no encontrado',
+                'data' => null
+            ], 404);
+        }
+
+        // Verificar que la oficina existe y está activa
+        $oficina = DB::table('gaf_oficin')
+            ->where('oficin_codigo', $request->oficin_codigo)
+            ->where('oficin_ctractual', 1)
+            ->first();
+
+        if (!$oficina) {
+            Log::warning("❌ Oficina no encontrada o inactiva: {$request->oficin_codigo}");
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La oficina seleccionada no está activa o no existe',
+                'data' => null
+            ], 400);
+        }
+
+        DB::beginTransaction();
+
+        $oficinaAnterior = $usuario->oficin_codigo;
+        
+        Log::info("🏢 Asignando oficina {$request->oficin_codigo} al usuario {$id}");
+        
+        $usuario->cambiarOficina($request->oficin_codigo, $request->motivo);
+        $usuarioActualizado = $this->getUsuarioCompleto($id);
+
+        if (!$usuarioActualizado) {
+            throw new \Exception("No se pudo obtener la información actualizada del usuario");
+        }
+
+        DB::commit();
+
+        Log::info("✅ Oficina asignada correctamente al usuario {$id}");
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Oficina asignada exitosamente',
+            'data' => [
+                'usuario' => $usuarioActualizado,
+                'cambio' => [
+                    'oficina_anterior' => $oficinaAnterior,
+                    'oficina_nueva' => $request->oficin_codigo,
+                    'motivo' => $request->motivo
+                ]
+            ]
+        ]);
+
+    } catch (\Illuminate\Database\QueryException $e) {
+        DB::rollBack();
+        Log::error("❌ Error de base de datos asignando oficina usuario {$id}: " . $e->getMessage());
+        
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error de base de datos al asignar oficina',
+            'data' => [
+                'error_code' => $e->getCode(),
+                'sql_state' => $e->errorInfo[0] ?? null
+            ]
+        ], 500);
+        
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error("❌ Error general asignando oficina usuario {$id}: " . $e->getMessage());
+        Log::error("❌ Trace: " . $e->getTraceAsString());
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error interno del servidor al asignar oficina',
+            'data' => [
+                'error_type' => get_class($e),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile()),
+                'message' => $e->getMessage()
+            ]
+        ], 500);
+    }
+}
+
+
+public function removerOficina(Request $request, $id)
+{
+    try {
+        $usuario = Usuario::find($id);
+
+        if (!$usuario) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no encontrado',
+                'data' => null
+            ], 404);
+        }
+
+        if (!$usuario->tieneOficinaAsignada()) {
+            return response()->json([
+                'status' => 'warning',
+                'message' => 'El usuario no tiene oficina asignada',
+                'data' => null
+            ], 400);
+        }
+
+        DB::beginTransaction();
+
+        $oficinaAnterior = $usuario->oficin_codigo;
+        
+        // ✅ CAMBIO DIRECTO SIN LLAMAR getUsuarioCompleto
+        $usuario->update([
+            'oficin_codigo' => null,
+            'usu_edi' => now()
+        ]);
+
+        DB::commit();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Oficina removida exitosamente',
+            'data' => [
+                'usuario_id' => $usuario->usu_id,
+                'cambio' => [
+                    'oficina_anterior' => $oficinaAnterior,
+                    'oficina_nueva' => null,
+                    'motivo' => $request->motivo
+                ]
+            ]
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al remover oficina: ' . $e->getMessage(),
+            'data' => null
+        ], 500);
+    }
+}
    
     /**
      * Toggle user status (enable/disable)
@@ -1116,44 +1273,32 @@ public function cleanupBrokenPermissions()
      * Get complete user information
      * ✅ CORRECCIÓN: Mejorar consulta para incluir toda la información necesaria
      */
-    private function getUsuarioCompleto($id)
-    {
-        return DB::table('tbl_usu')
-            ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
-            ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-            ->leftJoin('tbl_usu as creador', 'tbl_usu.usu_creado_por', '=', 'creador.usu_id')
-            ->leftJoin('tbl_usu as editor', 'tbl_usu.usu_editado_por', '=', 'editor.usu_id')
-            ->where('tbl_usu.usu_id', $id)
-            ->select(
-                'tbl_usu.usu_id',
-                'tbl_usu.usu_nom',
-                'tbl_usu.usu_nom2',
-                'tbl_usu.usu_ape',
-                'tbl_usu.usu_ape2',
-                'tbl_usu.usu_cor',
-                'tbl_usu.usu_ced',
-                'tbl_usu.usu_tel',
-                'tbl_usu.usu_dir',
-                'tbl_usu.per_id',
-                'tbl_usu.est_id',
-                'tbl_usu.usu_descripcion',
-                'tbl_usu.usu_fecha_nacimiento',
-                'tbl_usu.usu_fecha_registro',
-                'tbl_usu.usu_ultimo_acceso',
-                'tbl_usu.usu_intentos_fallidos',
-                'tbl_usu.usu_bloqueado_hasta',
-                'tbl_usu.usu_deshabilitado',
-                'tbl_usu.usu_cre',
-                'tbl_usu.usu_edi',
-                'tbl_per.per_nom as perfil',
-                'tbl_est.est_nom as estado',
-                'creador.usu_nom as creado_por_nombre',
-                'editor.usu_nom as editado_por_nombre',
-                DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
-            )
-            ->first();
-    }
-
+ private function getUsuarioCompleto($id)
+{
+    return DB::table('tbl_usu')
+        ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
+        ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
+        ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo') // ✅ CORREGIDO
+        ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo') // ✅ CORREGIDO
+        ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo') // ✅ CORREGIDO
+        ->leftJoin('tbl_usu as creador', 'tbl_usu.usu_creado_por', '=', 'creador.usu_id')
+        ->leftJoin('tbl_usu as editor', 'tbl_usu.usu_editado_por', '=', 'editor.usu_id')
+        ->select(
+            'tbl_usu.*',
+            'tbl_per.per_nom as perfil',
+            'tbl_est.est_nom as estado',
+            // ✅ CAMPOS DE OFICINA CORREGIDOS
+            'gaf_oficin.oficin_nombre as oficina_nombre',
+            'gaf_oficin.oficin_direccion as oficina_direccion',
+            'gaf_tofici.tofici_descripcion as tipo_oficina',
+            'gaf_instit.instit_nombre as institucion',
+            'creador.usu_nom as creado_por_nombre',
+            'editor.usu_nom as editado_por_nombre',
+            DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
+        )
+        ->where('tbl_usu.usu_id', $id)
+        ->first();
+}
     /**
      * Get form options for user creation/editing
      */

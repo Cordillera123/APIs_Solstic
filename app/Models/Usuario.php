@@ -7,6 +7,7 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log; // ✅ AGREGAR ESTA LÍNEA 
 
 class Usuario extends Authenticatable
 {
@@ -19,6 +20,7 @@ class Usuario extends Authenticatable
     protected $fillable = [
         'usu_nom', 'usu_nom2', 'usu_ape', 'usu_ape2', 'usu_cor',
         'usu_ced', 'usu_con', 'usu_tel', 'usu_dir', 'per_id', 'est_id',
+        'oficin_codigo', // ✅ AGREGADO: Campo para oficina
         'usu_descripcion', 'usu_fecha_nacimiento', 'usu_fecha_registro',
         'usu_fecha_actualizacion_clave', 'usu_fecha_cambio_clave',
         'usu_deshabilitado', 'usu_clave_hasheada', 'usu_nombre_encriptado',
@@ -48,6 +50,7 @@ class Usuario extends Authenticatable
         'usu_intentos_fallidos' => 'integer',
         'per_id' => 'integer',
         'est_id' => 'integer',
+        'oficin_codigo' => 'integer', // ✅ AGREGADO: Cast para oficina
         'usu_creado_por' => 'integer',
         'usu_editado_por' => 'integer'
     ];
@@ -79,6 +82,14 @@ class Usuario extends Authenticatable
     }
 
     /**
+     * ✅ NUEVA RELACIÓN: Oficina asignada
+     */
+    public function oficina()
+    {
+        return $this->belongsTo(Oficina::class, 'oficin_codigo', 'oficin_codigo');
+    }
+
+    /**
      * Usuario que creó este registro
      */
     public function creadoPor()
@@ -95,14 +106,6 @@ class Usuario extends Authenticatable
     }
 
     // ==================== AUTENTICACIÓN ====================
-
-    /**
-     * Get the password for authentication.
-     */
-    // public function getAuthPassword()
-    // {
-    //     return $this->usu_con;
-    // }
 
     /**
      * Get the email for password reset.
@@ -156,6 +159,28 @@ class Usuario extends Authenticatable
         return $this->nombre_completo;
     }
 
+    /**
+     * ✅ NUEVO ACCESSOR: Información de ubicación laboral
+     */
+    public function getUbicacionLaboralAttribute()
+    {
+        if (!$this->oficina) {
+            return 'Sin oficina asignada';
+        }
+
+        $ubicacion = $this->oficina->oficin_nombre;
+        
+        if ($this->oficina->tipoOficina) {
+            $ubicacion = $this->oficina->tipoOficina->tofici_descripcion . ' - ' . $ubicacion;
+        }
+
+        if ($this->oficina->institucion) {
+            $ubicacion .= ' (' . $this->oficina->institucion->instit_nombre . ')';
+        }
+
+        return $ubicacion;
+    }
+
     // ==================== SCOPES ====================
 
     /**
@@ -180,6 +205,22 @@ class Usuario extends Authenticatable
     public function scopePorEstado($query, $estadoId)
     {
         return $query->where('est_id', $estadoId);
+    }
+
+    /**
+     * ✅ NUEVO SCOPE: Usuarios por oficina
+     */
+    public function scopePorOficina($query, $oficinaCodigo)
+    {
+        return $query->where('oficin_codigo', $oficinaCodigo);
+    }
+
+    /**
+     * ✅ NUEVO SCOPE: Usuarios sin oficina asignada
+     */
+    public function scopeSinOficina($query)
+    {
+        return $query->whereNull('oficin_codigo');
     }
 
     /**
@@ -231,6 +272,38 @@ class Usuario extends Authenticatable
         return !$this->usu_deshabilitado;
     }
 
+    /**
+     * ✅ NUEVO MÉTODO: Verificar si tiene oficina asignada
+     */
+    public function tieneOficinaAsignada()
+    {
+        return !is_null($this->oficin_codigo);
+    }
+
+    /**
+     * ✅ NUEVO MÉTODO: Verificar si trabaja en matriz
+     */
+    public function trabajaEnMatriz()
+    {
+        return $this->oficina && $this->oficina->esMatriz();
+    }
+
+    /**
+     * ✅ NUEVO MÉTODO: Verificar si trabaja en sucursal
+     */
+    public function trabajaEnSucursal()
+    {
+        return $this->oficina && $this->oficina->esSucursal();
+    }
+
+    /**
+     * ✅ NUEVO MÉTODO: Verificar si trabaja en agencia
+     */
+    public function trabajaEnAgencia()
+    {
+        return $this->oficina && $this->oficina->esAgencia();
+    }
+
     // ==================== MÉTODOS DE UTILIDAD ====================
 
     /**
@@ -261,7 +334,7 @@ class Usuario extends Authenticatable
     }
 
     /**
-     * Obtener información básica del usuario
+     * ✅ MÉTODO ACTUALIZADO: Obtener información básica del usuario incluyendo oficina
      */
     public function getInfoBasica()
     {
@@ -273,8 +346,40 @@ class Usuario extends Authenticatable
             'perfil' => $this->perfil?->per_nom,
             'estado' => $this->estado?->est_nom,
             'activo' => $this->estaActivo(),
-            'bloqueado' => $this->estaBloqueado()
+            'bloqueado' => $this->estaBloqueado(),
+            // ✅ INFORMACIÓN DE OFICINA
+            'oficin_codigo' => $this->oficin_codigo,
+            'oficina_nombre' => $this->oficina?->oficin_nombre,
+            'ubicacion_laboral' => $this->ubicacion_laboral,
+            'tipo_oficina' => $this->oficina?->tipoOficina?->tofici_descripcion,
+            'institucion' => $this->oficina?->institucion?->instit_nombre,
+            'tiene_oficina_asignada' => $this->tieneOficinaAsignada()
         ];
+    }
+
+    /**
+     * ✅ NUEVO MÉTODO: Cambiar oficina del usuario
+     */
+    public function cambiarOficina($nuevaOficinaId, $motivo = null)
+    {
+        $oficinaAnterior = $this->oficin_codigo;
+        
+        $this->update([
+            'oficin_codigo' => $nuevaOficinaId,
+            'usu_edi' => now()
+        ]);
+
+        // Log del cambio
+        Log::info("🏢 Cambio de oficina:", [
+            'usu_id' => $this->usu_id,
+            'usuario' => $this->usu_cor,
+            'oficina_anterior' => $oficinaAnterior,
+            'oficina_nueva' => $nuevaOficinaId,
+            'motivo' => $motivo,
+            'fecha' => now()
+        ]);
+
+        return $this->fresh();
     }
 
     /**
@@ -321,6 +426,16 @@ class Usuario extends Authenticatable
         // Evento al actualizar un usuario
         static::updating(function ($usuario) {
             $usuario->usu_edi = now();
+
+            // ✅ LOG AUTOMÁTICO DE CAMBIOS DE OFICINA
+            if ($usuario->isDirty('oficin_codigo')) {
+                Log::info("🔄 Detectado cambio de oficina en modelo:", [
+                    'usu_id' => $usuario->usu_id,
+                    'oficina_anterior' => $usuario->getOriginal('oficin_codigo'),
+                    'oficina_nueva' => $usuario->oficin_codigo,
+                    'timestamp' => now()
+                ]);
+            }
         });
     }
 }

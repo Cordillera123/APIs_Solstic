@@ -73,7 +73,7 @@ class OficinaController extends Controller
                         ->orWhere('gaf_tofici.tofici_descripcion', 'ILIKE', "%{$search}%");
                 });
             }
-
+            
             // Filtros específicos
             if (!empty($institucionId)) {
                 $query->where('gaf_oficin.oficin_instit_codigo', $institucionId);

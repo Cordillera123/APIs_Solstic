@@ -18,6 +18,10 @@ use App\Http\Controllers\Api\OficinaController;
 use App\Http\Controllers\Api\UserButtonPermissionController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\TipoOficinaController;
+use App\Http\Controllers\Api\InstitucionController;
+use App\Http\Controllers\Api\ProvinciaController;
+use App\Http\Controllers\Api\CantonController;
+use App\Http\Controllers\Api\ParroquiaController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -76,6 +80,29 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/direct-modules/perfiles/{perfilId}/toggle', [DirectModulesController::class, 'toggleModuloDirectoAccess']);
     Route::post('/direct-modules/perfiles/{perfilId}/asignacion-masiva', [DirectModulesController::class, 'asignacionMasiva']);
     Route::post('/direct-modules/copiar-configuracion', [DirectModulesController::class, 'copiarConfiguracion']);
+    Route::prefix('instituciones')->group(function () {
+        Route::get('/', [InstitucionController::class, 'index']);
+        Route::get('/listar', [InstitucionController::class, 'listar']);
+    });
+
+    // ===== GESTIÓN DE PROVINCIAS =====
+    Route::prefix('provincias')->group(function () {
+        Route::get('/', [ProvinciaController::class, 'index']);
+        Route::get('/listar', [ProvinciaController::class, 'listar']);
+    });
+
+    // ===== GESTIÓN DE CANTONES =====
+    Route::prefix('cantones')->group(function () {
+        Route::get('/', [CantonController::class, 'index']);
+        Route::get('/listar', [CantonController::class, 'listar']); // TODOS los cantones
+        Route::get('/provincia/{provinciaId}', [CantonController::class, 'getByProvincia']);
+    });
+
+    // ===== GESTIÓN DE PARROQUIAS =====
+    Route::prefix('parroquias')->group(function () {
+        Route::get('/', [ParroquiaController::class, 'index']);
+        Route::get('/canton/{cantonId}', [ParroquiaController::class, 'getByCanton']);
+    });
 
     // === NUEVAS RUTAS PARA PERMISOS DE MENÚS DIRECTOS ===
     Route::get('/my-menu-button-permissions/{menuId}', [MenuButtonPermissionsController::class, 'getMyMenuButtonPermissions']);
@@ -310,7 +337,11 @@ Route::middleware('auth:sanctum')->group(function () {
             'submenus' => DB::table('tbl_sub')->where('sub_activo', true)->select('sub_id as value', 'sub_nom as label')->get(),
             'opciones' => DB::table('tbl_opc')->where('opc_activo', true)->select('opc_id as value', 'opc_nom as label')->get(),
             'botones' => DB::table('tbl_bot')->where('bot_activo', true)->select('bot_id as value', 'bot_nom as label', 'bot_codigo', 'bot_color')->orderBy('bot_orden')->get(),
-            'iconos' => DB::table('tbl_ico')->select('ico_id as value', 'ico_nom as label', 'ico_lib as libreria')->get()
+            'iconos' => DB::table('tbl_ico')->select('ico_id as value', 'ico_nom as label', 'ico_lib as libreria')->get(),
+            'instituciones' => DB::table('gaf_instit')->where('instit_activo', true)->select('instit_codigo as value', 'instit_nombre as label')->orderBy('instit_nombre')->get(),
+            'tipos_oficina' => DB::table('gaf_tofici')->where('tofici_activo', true)->select('tofici_codigo as value', 'tofici_descripcion as label')->orderBy('tofici_descripcion')->get(),
+            'provincias' => DB::table('gaf_provin')->select('provin_codigo as value', 'provin_nombre as label')->orderBy('provin_nombre')->get(),
+            'cantones' => DB::table('gaf_canton as c')->leftJoin('gaf_provin as p', 'c.canton_provin_codigo', '=', 'p.provin_codigo')->select('c.canton_codigo as value', DB::raw("CONCAT(c.canton_nombre, ' (', p.provin_nombre, ')') as label"))->orderBy('c.canton_nombre')->get(),
         ]);
     });
 
@@ -400,5 +431,4 @@ Route::middleware('auth:sanctum')->group(function () {
             'data' => $stats
         ]);
     });
-
 });

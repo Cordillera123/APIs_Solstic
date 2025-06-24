@@ -130,6 +130,7 @@ class OficinaController extends Controller
      */
     public function store(Request $request)
     {
+        // ✅ VALIDACIONES CORREGIDAS
         $validator = Validator::make($request->all(), [
             'oficin_nombre' => 'required|string|max:60',
             'oficin_instit_codigo' => 'required|integer|exists:gaf_instit,instit_codigo',
@@ -138,15 +139,26 @@ class OficinaController extends Controller
             'oficin_direccion' => 'required|string|max:80',
             'oficin_telefono' => 'required|string|max:30',
             'oficin_diremail' => 'required|email|max:120',
-            'oficin_codocntrl' => 'required|string|max:20',
+            'oficin_rucoficina' => 'required|string|size:13|unique:gaf_oficin,oficin_rucoficina|regex:/^[0-9]{13}$/',
+            'oficin_codocntrl' => 'nullable|string|max:20',
             'oficin_ctractual' => 'required|integer|in:0,1',
             'oficin_eregis_codigo' => 'nullable|integer|exists:gaf_eregis,eregis_codigo',
-            'oficin_rucoficina' => 'required|string|max:20|unique:gaf_oficin,oficin_rucoficina',
-            'oficin_codresapertura' => 'required|string|max:20',
-            'oficin_fechaapertura' => 'required|date',
+            'oficin_codresapertura' => 'nullable|string|max:20',
+            'oficin_fechaapertura' => 'nullable|date',
             'oficin_fechacierre' => 'nullable|date|after:oficin_fechaapertura',
-            'oficin_codrescierre' => 'nullable|date',
+            'oficin_codrescierre' => 'nullable|string|max:20',
             'oficin_fecharescierre' => 'nullable|date'
+        ], [
+            // Mensajes personalizados
+            'oficin_nombre.required' => 'El nombre de la oficina es requerido',
+            'oficin_nombre.max' => 'El nombre no puede exceder 60 caracteres',
+            'oficin_rucoficina.size' => 'El RUC debe tener exactamente 13 dígitos',
+            'oficin_rucoficina.unique' => 'Este RUC ya está registrado en otra oficina',
+            'oficin_rucoficina.regex' => 'El RUC debe contener solo números',
+            'oficin_diremail.email' => 'El formato del email es inválido',
+            'oficin_instit_codigo.exists' => 'La institución seleccionada no existe',
+            'oficin_tofici_codigo.exists' => 'El tipo de oficina seleccionado no existe',
+            'oficin_parroq_codigo.exists' => 'La parroquia seleccionada no existe'
         ]);
 
         if ($validator->fails()) {
@@ -161,9 +173,18 @@ class OficinaController extends Controller
         try {
             DB::beginTransaction();
 
+            // ✅ PREPARAR DATOS CON VALORES POR DEFECTO
             $oficinaData = $request->all();
+            
+            // Asegurar valores por defecto para campos opcionales
+            $oficinaData['oficin_codocntrl'] = $oficinaData['oficin_codocntrl'] ?: 'AUTO-' . time();
+            $oficinaData['oficin_fechaapertura'] = $oficinaData['oficin_fechaapertura'] ?: Carbon::now()->format('Y-m-d');
+            $oficinaData['oficin_codresapertura'] = $oficinaData['oficin_codresapertura'] ?: 'PENDIENTE';
 
-            Log::info("🏢 Creando oficina:", ['nombre' => $oficinaData['oficin_nombre']]);
+            Log::info("🏢 Creando oficina:", [
+                'nombre' => $oficinaData['oficin_nombre'],
+                'ruc' => $oficinaData['oficin_rucoficina']
+            ]);
 
             $oficina = Oficina::create($oficinaData);
 
@@ -186,6 +207,7 @@ class OficinaController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("❌ Error creando oficina: " . $e->getMessage());
+            Log::error("❌ Stack trace: " . $e->getTraceAsString());
 
             return response()->json([
                 'status' => 'error',
@@ -219,11 +241,6 @@ class OficinaController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error("❌ Error en show oficina: " . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error al obtener oficina: ' . $e->getMessage(),
-                'data' => null
-            ], 500);
         }
     }
 
@@ -233,6 +250,7 @@ class OficinaController extends Controller
      */
     public function update(Request $request, $id)
     {
+        // ✅ VALIDACIONES CORREGIDAS PARA UPDATE
         $validator = Validator::make($request->all(), [
             'oficin_nombre' => 'required|string|max:60',
             'oficin_instit_codigo' => 'required|integer|exists:gaf_instit,instit_codigo',
@@ -241,15 +259,26 @@ class OficinaController extends Controller
             'oficin_direccion' => 'required|string|max:80',
             'oficin_telefono' => 'required|string|max:30',
             'oficin_diremail' => 'required|email|max:120',
-            'oficin_codocntrl' => 'required|string|max:20',
+            'oficin_rucoficina' => 'required|string|size:13|unique:gaf_oficin,oficin_rucoficina,' . $id . ',oficin_codigo|regex:/^[0-9]{13}$/',
+            'oficin_codocntrl' => 'nullable|string|max:20',
             'oficin_ctractual' => 'required|integer|in:0,1',
             'oficin_eregis_codigo' => 'nullable|integer|exists:gaf_eregis,eregis_codigo',
-            'oficin_rucoficina' => 'required|string|max:20|unique:gaf_oficin,oficin_rucoficina,' . $id . ',oficin_codigo',
-            'oficin_codresapertura' => 'required|string|max:20',
-            'oficin_fechaapertura' => 'required|date',
+            'oficin_codresapertura' => 'nullable|string|max:20',
+            'oficin_fechaapertura' => 'nullable|date',
             'oficin_fechacierre' => 'nullable|date|after:oficin_fechaapertura',
-            'oficin_codrescierre' => 'nullable|date',
+            'oficin_codrescierre' => 'nullable|string|max:20',
             'oficin_fecharescierre' => 'nullable|date'
+        ], [
+            // Mensajes personalizados
+            'oficin_nombre.required' => 'El nombre de la oficina es requerido',
+            'oficin_nombre.max' => 'El nombre no puede exceder 60 caracteres',
+            'oficin_rucoficina.size' => 'El RUC debe tener exactamente 13 dígitos',
+            'oficin_rucoficina.unique' => 'Este RUC ya está registrado en otra oficina',
+            'oficin_rucoficina.regex' => 'El RUC debe contener solo números',
+            'oficin_diremail.email' => 'El formato del email es inválido',
+            'oficin_instit_codigo.exists' => 'La institución seleccionada no existe',
+            'oficin_tofici_codigo.exists' => 'El tipo de oficina seleccionado no existe',
+            'oficin_parroq_codigo.exists' => 'La parroquia seleccionada no existe'
         ]);
 
         if ($validator->fails()) {
@@ -274,7 +303,21 @@ class OficinaController extends Controller
 
             DB::beginTransaction();
 
-            $oficina->update($request->all());
+            // ✅ PREPARAR DATOS PARA UPDATE
+            $updateData = $request->all();
+            
+            // Mantener valores existentes si no se proporcionan nuevos
+            if (empty($updateData['oficin_codocntrl'])) {
+                $updateData['oficin_codocntrl'] = $oficina->oficin_codocntrl;
+            }
+            if (empty($updateData['oficin_fechaapertura'])) {
+                $updateData['oficin_fechaapertura'] = $oficina->oficin_fechaapertura;
+            }
+            if (empty($updateData['oficin_codresapertura'])) {
+                $updateData['oficin_codresapertura'] = $oficina->oficin_codresapertura;
+            }
+
+            $oficina->update($updateData);
 
             Log::info("✅ Oficina actualizada:", [
                 'id' => $oficina->oficin_codigo,
@@ -295,6 +338,7 @@ class OficinaController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("❌ Error actualizando oficina: " . $e->getMessage());
+            Log::error("❌ Stack trace: " . $e->getTraceAsString());
 
             return response()->json([
                 'status' => 'error',
@@ -308,96 +352,95 @@ class OficinaController extends Controller
      * Remove the specified resource from storage.
      * DELETE /api/oficinas/{id}
      */
-    
-public function destroy($id)
-{
-    try {
-        Log::info("🗑️ Intentando eliminar oficina ID: {$id}");
-        
-        $oficina = Oficina::find($id);
-
-        if (!$oficina) {
-            Log::warning("❌ Oficina no encontrada: ID {$id}");
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Oficina no encontrada',
-                'data' => null
-            ], 404);
-        }
-
-        // Verificar si tiene usuarios asignados
-        $cantidadUsuarios = DB::table('tbl_usu')
-            ->where('oficin_codigo', $id)
-            ->count();
+    public function destroy($id)
+    {
+        try {
+            Log::info("🗑️ Intentando eliminar oficina ID: {$id}");
             
-        Log::info("📊 Usuarios encontrados en oficina {$id}: {$cantidadUsuarios}");
+            $oficina = Oficina::find($id);
 
-        if ($cantidadUsuarios > 0) {
-            Log::warning("⚠️ No se puede eliminar oficina {$id}: tiene {$cantidadUsuarios} usuarios");
+            if (!$oficina) {
+                Log::warning("❌ Oficina no encontrada: ID {$id}");
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Oficina no encontrada',
+                    'data' => null
+                ], 404);
+            }
+
+            // Verificar si tiene usuarios asignados
+            $cantidadUsuarios = DB::table('tbl_usu')
+                ->where('oficin_codigo', $id)
+                ->count();
+                
+            Log::info("📊 Usuarios encontrados en oficina {$id}: {$cantidadUsuarios}");
+
+            if ($cantidadUsuarios > 0) {
+                Log::warning("⚠️ No se puede eliminar oficina {$id}: tiene {$cantidadUsuarios} usuarios");
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "No se puede eliminar la oficina porque tiene {$cantidadUsuarios} usuario(s) asignado(s)",
+                    'data' => [
+                        'oficin_codigo' => $oficina->oficin_codigo,
+                        'oficin_nombre' => $oficina->oficin_nombre,
+                        'cantidad_usuarios' => $cantidadUsuarios
+                    ]
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $oficinaInfo = [
+                'oficin_codigo' => $oficina->oficin_codigo,
+                'oficin_nombre' => $oficina->oficin_nombre,
+                'oficin_direccion' => $oficina->oficin_direccion
+            ];
+
+            $oficina->delete();
+
+            DB::commit();
+
+            Log::info("✅ Oficina eliminada correctamente: {$oficina->oficin_codigo}");
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Oficina eliminada exitosamente',
+                'data' => $oficinaInfo
+            ]);
+
+        } catch (\Illuminate\Database\QueryException $e) {
+            DB::rollBack();
+            Log::error("❌ Error de base de datos eliminando oficina: " . $e->getMessage());
+            
             return response()->json([
                 'status' => 'error',
-                'message' => "No se puede eliminar la oficina porque tiene {$cantidadUsuarios} usuario(s) asignado(s)",
+                'message' => 'Error de base de datos al eliminar oficina',
                 'data' => [
-                    'oficin_codigo' => $oficina->oficin_codigo,
-                    'oficin_nombre' => $oficina->oficin_nombre,
-                    'cantidad_usuarios' => $cantidadUsuarios
+                    'error_code' => $e->getCode(),
+                    'sql_state' => $e->errorInfo[0] ?? null
                 ]
-            ], 422);
+            ], 500);
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("❌ Error general eliminando oficina: " . $e->getMessage());
+            Log::error("❌ Trace: " . $e->getTraceAsString());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'data' => [
+                    'error_type' => get_class($e),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ]
+            ], 500);
         }
-
-        DB::beginTransaction();
-
-        $oficinaInfo = [
-            'oficin_codigo' => $oficina->oficin_codigo,
-            'oficin_nombre' => $oficina->oficin_nombre,
-            'oficin_direccion' => $oficina->oficin_direccion
-        ];
-
-        $oficina->delete();
-
-        DB::commit();
-
-        Log::info("✅ Oficina eliminada correctamente: {$oficina->oficin_codigo}");
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Oficina eliminada exitosamente',
-            'data' => $oficinaInfo
-        ]);
-
-    } catch (\Illuminate\Database\QueryException $e) {
-        DB::rollBack();
-        Log::error("❌ Error de base de datos eliminando oficina: " . $e->getMessage());
-        
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Error de base de datos al eliminar oficina',
-            'data' => [
-                'error_code' => $e->getCode(),
-                'sql_state' => $e->errorInfo[0] ?? null
-            ]
-        ], 500);
-        
-    } catch (\Exception $e) {
-        DB::rollBack();
-        Log::error("❌ Error general eliminando oficina: " . $e->getMessage());
-        Log::error("❌ Trace: " . $e->getTraceAsString());
-
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Error interno del servidor',
-            'data' => [
-                'error_type' => get_class($e),
-                'line' => $e->getLine(),
-                'file' => basename($e->getFile())
-            ]
-        ], 500);
     }
-}
 
     /**
      * Obtener lista simple de oficinas para select/dropdown
-     * GET /api/oficinas/listar
+     * GET /api/oficinas/listar/simple
      */
     public function listar(Request $request)
     {
@@ -459,153 +502,154 @@ public function destroy($id)
     }
 
     /**
- * Obtener usuarios de una oficina específica
- * GET /api/oficinas/{id}/usuarios
- */
-public function usuarios($id, Request $request)
-{
-    try {
-        Log::info("👥 Buscando usuarios de oficina ID: {$id}");
-        
-        // Verificar que la oficina existe
-        $oficina = DB::table('gaf_oficin')
-            ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo')
-            ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo')
-            ->where('gaf_oficin.oficin_codigo', $id)
-            ->select(
-                'gaf_oficin.oficin_codigo',
-                'gaf_oficin.oficin_nombre',
-                'gaf_oficin.oficin_direccion',
-                'gaf_oficin.oficin_telefono',
-                'gaf_oficin.oficin_diremail',
-                'gaf_oficin.oficin_ctractual',
-                'gaf_instit.instit_nombre',
-                'gaf_tofici.tofici_descripcion as tipo_oficina'
-            )
-            ->first();
+     * Obtener usuarios de una oficina específica
+     * GET /api/oficinas/{id}/usuarios
+     */
+    public function usuarios($id, Request $request)
+    {
+        try {
+            Log::info("👥 Buscando usuarios de oficina ID: {$id}");
+            
+            // Verificar que la oficina existe
+            $oficina = DB::table('gaf_oficin')
+                ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo')
+                ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo')
+                ->where('gaf_oficin.oficin_codigo', $id)
+                ->select(
+                    'gaf_oficin.oficin_codigo',
+                    'gaf_oficin.oficin_nombre',
+                    'gaf_oficin.oficin_direccion',
+                    'gaf_oficin.oficin_telefono',
+                    'gaf_oficin.oficin_diremail',
+                    'gaf_oficin.oficin_ctractual',
+                    'gaf_instit.instit_nombre',
+                    'gaf_tofici.tofici_descripcion as tipo_oficina'
+                )
+                ->first();
 
-        if (!$oficina) {
-            Log::warning("❌ Oficina no encontrada: ID {$id}");
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Oficina no encontrada',
-                'data' => null
-            ], 404);
-        }
+            if (!$oficina) {
+                Log::warning("❌ Oficina no encontrada: ID {$id}");
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Oficina no encontrada',
+                    'data' => null
+                ], 404);
+            }
 
-        $perPage = $request->get('per_page', 15);
-        $incluirDeshabilitados = $request->boolean('incluir_deshabilitados', false);
-        $search = $request->get('search', '');
+            $perPage = $request->get('per_page', 15);
+            $incluirDeshabilitados = $request->boolean('incluir_deshabilitados', false);
+            $search = $request->get('search', '');
 
-        // Consulta directa a usuarios de la oficina
-        $query = DB::table('tbl_usu')
-            ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
-            ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-            ->where('tbl_usu.oficin_codigo', $id)
-            ->select([
-                'tbl_usu.usu_id', 
-                'tbl_usu.usu_nom', 
-                'tbl_usu.usu_nom2', 
-                'tbl_usu.usu_ape', 
-                'tbl_usu.usu_ape2', 
-                'tbl_usu.usu_cor', 
-                'tbl_usu.usu_ced', 
-                'tbl_usu.usu_tel', 
-                'tbl_usu.per_id', 
-                'tbl_usu.est_id', 
-                'tbl_usu.usu_ultimo_acceso', 
-                'tbl_usu.usu_deshabilitado',
-                'tbl_usu.usu_fecha_registro',
-                'tbl_per.per_nom as perfil',
-                'tbl_est.est_nom as estado',
-                DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
+            // Consulta directa a usuarios de la oficina
+            $query = DB::table('tbl_usu')
+                ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
+                ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
+                ->where('tbl_usu.oficin_codigo', $id)
+                ->select([
+                    'tbl_usu.usu_id', 
+                    'tbl_usu.usu_nom', 
+                    'tbl_usu.usu_nom2', 
+                    'tbl_usu.usu_ape', 
+                    'tbl_usu.usu_ape2', 
+                    'tbl_usu.usu_cor', 
+                    'tbl_usu.usu_ced', 
+                    'tbl_usu.usu_tel', 
+                    'tbl_usu.per_id', 
+                    'tbl_usu.est_id', 
+                    'tbl_usu.usu_ultimo_acceso', 
+                    'tbl_usu.usu_deshabilitado',
+                    'tbl_usu.usu_fecha_registro',
+                    'tbl_per.per_nom as perfil',
+                    'tbl_est.est_nom as estado',
+                    DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
+                ]);
+
+            // Filtro por usuarios deshabilitados
+            if (!$incluirDeshabilitados) {
+                $query->where('tbl_usu.usu_deshabilitado', false);
+                Log::info("🔍 Filtro aplicado: Solo usuarios habilitados");
+            }
+
+            // Filtro de búsqueda
+            if (!empty($search)) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('tbl_usu.usu_nom', 'ILIKE', "%{$search}%")
+                        ->orWhere('tbl_usu.usu_ape', 'ILIKE', "%{$search}%")
+                        ->orWhere('tbl_usu.usu_cor', 'ILIKE', "%{$search}%")
+                        ->orWhere('tbl_usu.usu_ced', 'ILIKE', "%{$search}%");
+                });
+                Log::info("🔍 Filtro de búsqueda aplicado: {$search}");
+            }
+
+            $usuarios = $query->orderBy('tbl_usu.usu_nom', 'asc')
+                ->paginate($perPage);
+
+            // Calcular resumen
+            $resumen = [
+                'total_usuarios' => $usuarios->total(),
+                'usuarios_activos' => DB::table('tbl_usu')
+                    ->where('oficin_codigo', $id)
+                    ->where('usu_deshabilitado', false)
+                    ->count(),
+                'usuarios_deshabilitados' => DB::table('tbl_usu')
+                    ->where('oficin_codigo', $id)
+                    ->where('usu_deshabilitado', true)
+                    ->count()
+            ];
+
+            Log::info("✅ Usuarios obtenidos de oficina {$id}:", [
+                'total' => $usuarios->total(),
+                'pagina_actual' => $usuarios->currentPage(),
+                'activos' => $resumen['usuarios_activos'],
+                'deshabilitados' => $resumen['usuarios_deshabilitados']
             ]);
 
-        // Filtro por usuarios deshabilitados
-        if (!$incluirDeshabilitados) {
-            $query->where('tbl_usu.usu_deshabilitado', false);
-            Log::info("🔍 Filtro aplicado: Solo usuarios habilitados");
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Usuarios de la oficina obtenidos correctamente',
+                'data' => [
+                    'oficina' => [
+                        'oficin_codigo' => $oficina->oficin_codigo,
+                        'oficin_nombre' => $oficina->oficin_nombre,
+                        'oficin_direccion' => $oficina->oficin_direccion,
+                        'oficin_telefono' => $oficina->oficin_telefono,
+                        'oficin_diremail' => $oficina->oficin_diremail,
+                        'activa' => $oficina->oficin_ctractual == 1,
+                        'institucion' => $oficina->instit_nombre,
+                        'tipo_oficina' => $oficina->tipo_oficina
+                    ],
+                    'usuarios' => $usuarios,
+                    'resumen' => $resumen
+                ]
+            ]);
+
+        } catch (\Illuminate\Database\QueryException $e) {
+            Log::error("❌ Error de base de datos obteniendo usuarios de oficina: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al obtener usuarios',
+                'data' => [
+                    'error_code' => $e->getCode(),
+                    'sql_state' => $e->errorInfo[0] ?? null
+                ]
+            ], 500);
+            
+        } catch (\Exception $e) {
+            Log::error("❌ Error general obteniendo usuarios de oficina: " . $e->getMessage());
+            Log::error("❌ Trace: " . $e->getTraceAsString());
+            
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'data' => [
+                    'error_type' => get_class($e),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ]
+            ], 500);
         }
-
-        // Filtro de búsqueda
-        if (!empty($search)) {
-            $query->where(function ($q) use ($search) {
-                $q->where('tbl_usu.usu_nom', 'ILIKE', "%{$search}%")
-                    ->orWhere('tbl_usu.usu_ape', 'ILIKE', "%{$search}%")
-                    ->orWhere('tbl_usu.usu_cor', 'ILIKE', "%{$search}%")
-                    ->orWhere('tbl_usu.usu_ced', 'ILIKE', "%{$search}%");
-            });
-            Log::info("🔍 Filtro de búsqueda aplicado: {$search}");
-        }
-
-        $usuarios = $query->orderBy('tbl_usu.usu_nom', 'asc')
-            ->paginate($perPage);
-
-        // Calcular resumen
-        $resumen = [
-            'total_usuarios' => $usuarios->total(),
-            'usuarios_activos' => DB::table('tbl_usu')
-                ->where('oficin_codigo', $id)
-                ->where('usu_deshabilitado', false)
-                ->count(),
-            'usuarios_deshabilitados' => DB::table('tbl_usu')
-                ->where('oficin_codigo', $id)
-                ->where('usu_deshabilitado', true)
-                ->count()
-        ];
-
-        Log::info("✅ Usuarios obtenidos de oficina {$id}:", [
-            'total' => $usuarios->total(),
-            'pagina_actual' => $usuarios->currentPage(),
-            'activos' => $resumen['usuarios_activos'],
-            'deshabilitados' => $resumen['usuarios_deshabilitados']
-        ]);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Usuarios de la oficina obtenidos correctamente',
-            'data' => [
-                'oficina' => [
-                    'oficin_codigo' => $oficina->oficin_codigo,
-                    'oficin_nombre' => $oficina->oficin_nombre,
-                    'oficin_direccion' => $oficina->oficin_direccion,
-                    'oficin_telefono' => $oficina->oficin_telefono,
-                    'oficin_diremail' => $oficina->oficin_diremail,
-                    'activa' => $oficina->oficin_ctractual == 1,
-                    'institucion' => $oficina->instit_nombre,
-                    'tipo_oficina' => $oficina->tipo_oficina
-                ],
-                'usuarios' => $usuarios,
-                'resumen' => $resumen
-            ]
-        ]);
-
-    } catch (\Illuminate\Database\QueryException $e) {
-        Log::error("❌ Error de base de datos obteniendo usuarios de oficina: " . $e->getMessage());
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Error de base de datos al obtener usuarios',
-            'data' => [
-                'error_code' => $e->getCode(),
-                'sql_state' => $e->errorInfo[0] ?? null
-            ]
-        ], 500);
-        
-    } catch (\Exception $e) {
-        Log::error("❌ Error general obteniendo usuarios de oficina: " . $e->getMessage());
-        Log::error("❌ Trace: " . $e->getTraceAsString());
-        
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Error interno del servidor',
-            'data' => [
-                'error_type' => get_class($e),
-                'line' => $e->getLine(),
-                'file' => basename($e->getFile())
-            ]
-        ], 500);
     }
-}
+
     /**
      * Método privado para obtener oficina completa con relaciones
      */

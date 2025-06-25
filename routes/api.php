@@ -262,7 +262,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // ✅ NUEVAS RUTAS PARA OFICINAS EN USUARIOS
     Route::post('/usuarios/{id}/asignar-oficina', [UsuarioController::class, 'asignarOficina']);
     Route::delete('/usuarios/{id}/remover-oficina', [UsuarioController::class, 'removerOficina']);
-
+    
+    // ✅ AQUÍ VAN LAS NUEVAS RUTAS DEL USUARIO LOGUEADO
+    Route::get('/usuario/me', [UsuarioController::class, 'me']);
+    Route::get('/usuario/me/basica', [UsuarioController::class, 'meBasica']);
+    Route::get('/usuario/me/institucion', [UsuarioController::class, 'meInstitucion']);
+    Route::get('/usuario/me/oficina', [UsuarioController::class, 'meOficina']);
+   
     // === GESTIÓN DE PERFILES/ROLES ===
     Route::apiResource('perfiles', PerfilController::class);
     Route::get('/perfiles/{id}/usuarios', [PerfilController::class, 'getUsuarios']);

@@ -119,6 +119,246 @@ public function index(Request $request)
     }
 }
 
+    /*
+    *Agregar metodos para listar y mostar informacion de usuarios de la oficina a la que
+    *pertenece el usuario autenticado y la institucion a la que pertenece el usuario autenticado
+    */
+
+    /**
+     * Obtener información del usuario logueado
+     * GET /api/usuario/me
+     */
+    public function me(Request $request)
+    {
+        try {
+            $user = $request->user(); // Usuario autenticado
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Usuario no autenticado',
+                    'data' => null
+                ], 401);
+            }
+
+            Log::info("📋 Obteniendo información del usuario logueado: {$user->usu_id}");
+
+            // Usar el mismo método que ya tienes para obtener usuario completo
+            $usuarioCompleto = $this->getUsuarioCompleto($user->usu_id);
+
+            if (!$usuarioCompleto) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No se encontró información del usuario',
+                    'data' => null
+                ], 404);
+            }
+
+            // Ocultar campos sensibles
+            if (isset($usuarioCompleto->usu_con)) {
+                unset($usuarioCompleto->usu_con);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Información del usuario obtenida correctamente',
+                'data' => $usuarioCompleto
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ Error obteniendo información del usuario logueado: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener información básica del usuario logueado (optimizada)
+     * GET /api/usuario/me/basica
+     */
+    public function meBasica(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Usuario no autenticado',
+                    'data' => null
+                ], 401);
+            }
+
+            // Consulta optimizada solo con los campos necesarios
+            $usuarioBasico = DB::table('tbl_usu')
+                ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
+                ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
+                ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+                ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo')
+                ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo')
+                ->where('tbl_usu.usu_id', $user->usu_id)
+                ->select([
+                    'tbl_usu.usu_id',
+                    'tbl_usu.usu_nom',
+                    'tbl_usu.usu_ape',
+                    'tbl_usu.usu_cor',
+                    'tbl_per.per_nom as perfil',
+                    'tbl_est.est_nom as estado',
+                    'tbl_usu.oficin_codigo',
+                    'gaf_oficin.oficin_nombre',
+                    'gaf_tofici.tofici_descripcion as tipo_oficina',
+                    'gaf_instit.instit_codigo',
+                    'gaf_instit.instit_nombre',
+                    DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_ape, '')) as nombre_usuario"),
+                    DB::raw("CONCAT(COALESCE(gaf_tofici.tofici_descripcion, ''), ' - ', COALESCE(gaf_oficin.oficin_nombre, '')) as oficina_completa")
+                ])
+                ->first();
+
+            if (!$usuarioBasico) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No se encontró información del usuario',
+                    'data' => null
+                ], 404);
+            }
+
+            $response = [
+                'usu_id' => $usuarioBasico->usu_id,
+                'nombre_usuario' => trim($usuarioBasico->nombre_usuario),
+                'usu_cor' => $usuarioBasico->usu_cor,
+                'perfil' => $usuarioBasico->perfil,
+                'estado' => $usuarioBasico->estado,
+                'institucion' => [
+                    'instit_codigo' => $usuarioBasico->instit_codigo,
+                    'instit_nombre' => $usuarioBasico->instit_nombre
+                ],
+                'oficina' => [
+                    'oficin_codigo' => $usuarioBasico->oficin_codigo,
+                    'oficin_nombre' => $usuarioBasico->oficin_nombre,
+                    'tipo_oficina' => $usuarioBasico->tipo_oficina,
+                    'oficina_completa' => $usuarioBasico->oficina_completa
+                ],
+                'tiene_oficina_asignada' => !is_null($usuarioBasico->oficin_codigo)
+            ];
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Información básica del usuario obtenida correctamente',
+                'data' => $response
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ Error obteniendo información básica del usuario: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener solo institución del usuario logueado
+     * GET /api/usuario/me/institucion
+     */
+    public function meInstitucion(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Usuario no autenticado',
+                    'data' => null
+                ], 401);
+            }
+
+            $institucion = DB::table('tbl_usu')
+                ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+                ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo')
+                ->where('tbl_usu.usu_id', $user->usu_id)
+                ->select(['gaf_instit.instit_codigo', 'gaf_instit.instit_nombre'])
+                ->first();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Institución del usuario obtenida correctamente',
+                'data' => [
+                    'instit_codigo' => $institucion->instit_codigo ?? null,
+                    'instit_nombre' => $institucion->instit_nombre ?? null
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ Error obteniendo institución del usuario: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener solo oficina del usuario logueado
+     * GET /api/usuario/me/oficina
+     */
+    public function meOficina(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Usuario no autenticado',
+                    'data' => null
+                ], 401);
+            }
+
+            $oficina = DB::table('tbl_usu')
+                ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+                ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo')
+                ->where('tbl_usu.usu_id', $user->usu_id)
+                ->select([
+                    'gaf_oficin.oficin_codigo',
+                    'gaf_oficin.oficin_nombre',
+                    'gaf_oficin.oficin_direccion',
+                    'gaf_oficin.oficin_telefono',
+                    'gaf_oficin.oficin_diremail',
+                    'gaf_tofici.tofici_descripcion',
+                    DB::raw("CONCAT(COALESCE(gaf_tofici.tofici_descripcion, ''), ' - ', COALESCE(gaf_oficin.oficin_nombre, '')) as oficina_completa")
+                ])
+                ->first();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Oficina del usuario obtenida correctamente',
+                'data' => [
+                    'oficin_codigo' => $oficina->oficin_codigo ?? null,
+                    'oficin_nombre' => $oficina->oficin_nombre ?? null,
+                    'oficin_direccion' => $oficina->oficin_direccion ?? null,
+                    'oficin_telefono' => $oficina->oficin_telefono ?? null,
+                    'oficin_diremail' => $oficina->oficin_diremail ?? null,
+                    'tipo_oficina' => $oficina->tofici_descripcion ?? null,
+                    'oficina_completa' => $oficina->oficina_completa ?? null
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ Error obteniendo oficina del usuario: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'data' => null
+            ], 500);
+        }
+    }
+
     /**
      * Display the specified resource.
      */

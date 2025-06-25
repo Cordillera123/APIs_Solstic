@@ -123,99 +123,114 @@ class OficinaController extends Controller
             ], 500);
         }
     }
+    private function filtrarCamposOpcionales($data)
+{
+    $camposOpcionales = [
+        'oficin_fechacierre',
+        'oficin_codrescierre', 
+        'oficin_fecharescierre',
+        'oficin_eregis_codigo'
+    ];
 
-    /**
-     * Store a newly created resource in storage.
-     * POST /api/oficinas
-     */
-    public function store(Request $request)
-    {
-        // ✅ VALIDACIONES CORREGIDAS
-        $validator = Validator::make($request->all(), [
-            'oficin_nombre' => 'required|string|max:60',
-            'oficin_instit_codigo' => 'required|integer|exists:gaf_instit,instit_codigo',
-            'oficin_tofici_codigo' => 'required|integer|exists:gaf_tofici,tofici_codigo',
-            'oficin_parroq_codigo' => 'required|integer|exists:gaf_parroq,parroq_codigo',
-            'oficin_direccion' => 'required|string|max:80',
-            'oficin_telefono' => 'required|string|max:30',
-            'oficin_diremail' => 'required|email|max:120',
-            'oficin_rucoficina' => 'required|string|size:13|unique:gaf_oficin,oficin_rucoficina|regex:/^[0-9]{13}$/',
-            'oficin_codocntrl' => 'nullable|string|max:20',
-            'oficin_ctractual' => 'required|integer|in:0,1',
-            'oficin_eregis_codigo' => 'nullable|integer|exists:gaf_eregis,eregis_codigo',
-            'oficin_codresapertura' => 'nullable|string|max:20',
-            'oficin_fechaapertura' => 'nullable|date',
-            'oficin_fechacierre' => 'nullable|date|after:oficin_fechaapertura',
-            'oficin_codrescierre' => 'nullable|string|max:20',
-            'oficin_fecharescierre' => 'nullable|date'
-        ], [
-            // Mensajes personalizados
-            'oficin_nombre.required' => 'El nombre de la oficina es requerido',
-            'oficin_nombre.max' => 'El nombre no puede exceder 60 caracteres',
-            'oficin_rucoficina.size' => 'El RUC debe tener exactamente 13 dígitos',
-            'oficin_rucoficina.unique' => 'Este RUC ya está registrado en otra oficina',
-            'oficin_rucoficina.regex' => 'El RUC debe contener solo números',
-            'oficin_diremail.email' => 'El formato del email es inválido',
-            'oficin_instit_codigo.exists' => 'La institución seleccionada no existe',
-            'oficin_tofici_codigo.exists' => 'El tipo de oficina seleccionado no existe',
-            'oficin_parroq_codigo.exists' => 'La parroquia seleccionada no existe'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Datos de validación incorrectos',
-                'errors' => $validator->errors(),
-                'data' => null
-            ], 422);
-        }
-
-        try {
-            DB::beginTransaction();
-
-            // ✅ PREPARAR DATOS CON VALORES POR DEFECTO
-            $oficinaData = $request->all();
-            
-            // Asegurar valores por defecto para campos opcionales
-            $oficinaData['oficin_codocntrl'] = $oficinaData['oficin_codocntrl'] ?: 'AUTO-' . time();
-            $oficinaData['oficin_fechaapertura'] = $oficinaData['oficin_fechaapertura'] ?: Carbon::now()->format('Y-m-d');
-            $oficinaData['oficin_codresapertura'] = $oficinaData['oficin_codresapertura'] ?: 'PENDIENTE';
-
-            Log::info("🏢 Creando oficina:", [
-                'nombre' => $oficinaData['oficin_nombre'],
-                'ruc' => $oficinaData['oficin_rucoficina']
-            ]);
-
-            $oficina = Oficina::create($oficinaData);
-
-            Log::info("📥 Oficina creada con éxito:", [
-                'id' => $oficina->oficin_codigo,
-                'nombre' => $oficina->oficin_nombre
-            ]);
-
-            // Obtener la oficina creada con relaciones
-            $oficinaCompleta = $this->getOficinaCompleta($oficina->oficin_codigo);
-
-            DB::commit();
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Oficina creada exitosamente',
-                'data' => $oficinaCompleta
-            ], 201);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error("❌ Error creando oficina: " . $e->getMessage());
-            Log::error("❌ Stack trace: " . $e->getTraceAsString());
-
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error al crear oficina: ' . $e->getMessage(),
-                'data' => null
-            ], 500);
+    foreach ($camposOpcionales as $campo) {
+        if (empty($data[$campo])) {
+            unset($data[$campo]);
         }
     }
+
+    return $data;
+}
+   
+    public function store(Request $request)
+{
+    // ✅ VALIDACIONES CORREGIDAS
+    $validator = Validator::make($request->all(), [
+        'oficin_nombre' => 'required|string|max:60',
+        'oficin_instit_codigo' => 'required|integer|exists:gaf_instit,instit_codigo',
+        'oficin_tofici_codigo' => 'required|integer|exists:gaf_tofici,tofici_codigo',
+        'oficin_parroq_codigo' => 'required|integer|exists:gaf_parroq,parroq_codigo',
+        'oficin_direccion' => 'required|string|max:80',
+        'oficin_telefono' => 'required|string|max:30',
+        'oficin_diremail' => 'required|email|max:120',
+        'oficin_rucoficina' => 'required|string|size:13|unique:gaf_oficin,oficin_rucoficina|regex:/^[0-9]{13}$/',
+        'oficin_codocntrl' => 'nullable|string|max:20',
+        'oficin_ctractual' => 'required|integer|in:0,1',
+        'oficin_eregis_codigo' => 'nullable|integer|exists:gaf_eregis,eregis_codigo',
+        'oficin_codresapertura' => 'nullable|string|max:20',
+        'oficin_fechaapertura' => 'nullable|date',
+        'oficin_fechacierre' => 'nullable|date|after:oficin_fechaapertura',
+        'oficin_codrescierre' => 'nullable|string|max:20',
+        'oficin_fecharescierre' => 'nullable|date'
+    ], [
+        // Mensajes personalizados
+        'oficin_nombre.required' => 'El nombre de la oficina es requerido',
+        'oficin_nombre.max' => 'El nombre no puede exceder 60 caracteres',
+        'oficin_rucoficina.size' => 'El RUC debe tener exactamente 13 dígitos',
+        'oficin_rucoficina.unique' => 'Este RUC ya está registrado en otra oficina',
+        'oficin_rucoficina.regex' => 'El RUC debe contener solo números',
+        'oficin_diremail.email' => 'El formato del email es inválido',
+        'oficin_instit_codigo.exists' => 'La institución seleccionada no existe',
+        'oficin_tofici_codigo.exists' => 'El tipo de oficina seleccionado no existe',
+        'oficin_parroq_codigo.exists' => 'La parroquia seleccionada no existe'
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Datos de validación incorrectos',
+            'errors' => $validator->errors(),
+            'data' => null
+        ], 422);
+    }
+
+    try {
+        DB::beginTransaction();
+
+        // ✅ FILTRAR CAMPOS OPCIONALES VACÍOS
+        $oficinaData = $this->filtrarCamposOpcionales($request->all());
+        
+        // Asegurar valores por defecto para campos requeridos
+        $oficinaData['oficin_codocntrl'] = $oficinaData['oficin_codocntrl'] ?: 'AUTO-' . time();
+        $oficinaData['oficin_fechaapertura'] = $oficinaData['oficin_fechaapertura'] ?: Carbon::now()->format('Y-m-d');
+        $oficinaData['oficin_codresapertura'] = $oficinaData['oficin_codresapertura'] ?: 'PENDIENTE';
+
+        Log::info("🏢 Creando oficina con datos filtrados:", [
+            'nombre' => $oficinaData['oficin_nombre'],
+            'ruc' => $oficinaData['oficin_rucoficina'],
+            'campos_incluidos' => array_keys($oficinaData)
+        ]);
+
+        $oficina = Oficina::create($oficinaData);
+
+        Log::info("📥 Oficina creada con éxito:", [
+            'id' => $oficina->oficin_codigo,
+            'nombre' => $oficina->oficin_nombre
+        ]);
+
+        // Obtener la oficina creada con relaciones
+        $oficinaCompleta = $this->getOficinaCompleta($oficina->oficin_codigo);
+
+        DB::commit();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Oficina creada exitosamente',
+            'data' => $oficinaCompleta
+        ], 201);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error("❌ Error creando oficina: " . $e->getMessage());
+        Log::error("❌ Stack trace: " . $e->getTraceAsString());
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al crear oficina: ' . $e->getMessage(),
+            'data' => null
+        ], 500);
+    }
+}
+
 
     /**
      * Display the specified resource.
@@ -249,104 +264,111 @@ class OficinaController extends Controller
      * PUT /api/oficinas/{id}
      */
     public function update(Request $request, $id)
-    {
-        // ✅ VALIDACIONES CORREGIDAS PARA UPDATE
-        $validator = Validator::make($request->all(), [
-            'oficin_nombre' => 'required|string|max:60',
-            'oficin_instit_codigo' => 'required|integer|exists:gaf_instit,instit_codigo',
-            'oficin_tofici_codigo' => 'required|integer|exists:gaf_tofici,tofici_codigo',
-            'oficin_parroq_codigo' => 'required|integer|exists:gaf_parroq,parroq_codigo',
-            'oficin_direccion' => 'required|string|max:80',
-            'oficin_telefono' => 'required|string|max:30',
-            'oficin_diremail' => 'required|email|max:120',
-            'oficin_rucoficina' => 'required|string|size:13|unique:gaf_oficin,oficin_rucoficina,' . $id . ',oficin_codigo|regex:/^[0-9]{13}$/',
-            'oficin_codocntrl' => 'nullable|string|max:20',
-            'oficin_ctractual' => 'required|integer|in:0,1',
-            'oficin_eregis_codigo' => 'nullable|integer|exists:gaf_eregis,eregis_codigo',
-            'oficin_codresapertura' => 'nullable|string|max:20',
-            'oficin_fechaapertura' => 'nullable|date',
-            'oficin_fechacierre' => 'nullable|date|after:oficin_fechaapertura',
-            'oficin_codrescierre' => 'nullable|string|max:20',
-            'oficin_fecharescierre' => 'nullable|date'
-        ], [
-            // Mensajes personalizados
-            'oficin_nombre.required' => 'El nombre de la oficina es requerido',
-            'oficin_nombre.max' => 'El nombre no puede exceder 60 caracteres',
-            'oficin_rucoficina.size' => 'El RUC debe tener exactamente 13 dígitos',
-            'oficin_rucoficina.unique' => 'Este RUC ya está registrado en otra oficina',
-            'oficin_rucoficina.regex' => 'El RUC debe contener solo números',
-            'oficin_diremail.email' => 'El formato del email es inválido',
-            'oficin_instit_codigo.exists' => 'La institución seleccionada no existe',
-            'oficin_tofici_codigo.exists' => 'El tipo de oficina seleccionado no existe',
-            'oficin_parroq_codigo.exists' => 'La parroquia seleccionada no existe'
+{
+    // ✅ VALIDACIONES CORREGIDAS PARA UPDATE
+    $validator = Validator::make($request->all(), [
+        'oficin_nombre' => 'required|string|max:60',
+        'oficin_instit_codigo' => 'required|integer|exists:gaf_instit,instit_codigo',
+        'oficin_tofici_codigo' => 'required|integer|exists:gaf_tofici,tofici_codigo',
+        'oficin_parroq_codigo' => 'required|integer|exists:gaf_parroq,parroq_codigo',
+        'oficin_direccion' => 'required|string|max:80',
+        'oficin_telefono' => 'required|string|max:30',
+        'oficin_diremail' => 'required|email|max:120',
+        'oficin_rucoficina' => 'required|string|size:13|unique:gaf_oficin,oficin_rucoficina,' . $id . ',oficin_codigo|regex:/^[0-9]{13}$/',
+        'oficin_codocntrl' => 'nullable|string|max:20',
+        'oficin_ctractual' => 'required|integer|in:0,1',
+        'oficin_eregis_codigo' => 'nullable|integer|exists:gaf_eregis,eregis_codigo',
+        'oficin_codresapertura' => 'nullable|string|max:20',
+        'oficin_fechaapertura' => 'nullable|date',
+        'oficin_fechacierre' => 'nullable|date|after:oficin_fechaapertura',
+        'oficin_codrescierre' => 'nullable|string|max:20',
+        'oficin_fecharescierre' => 'nullable|date'
+    ], [
+        // Mensajes personalizados
+        'oficin_nombre.required' => 'El nombre de la oficina es requerido',
+        'oficin_nombre.max' => 'El nombre no puede exceder 60 caracteres',
+        'oficin_rucoficina.size' => 'El RUC debe tener exactamente 13 dígitos',
+        'oficin_rucoficina.unique' => 'Este RUC ya está registrado en otra oficina',
+        'oficin_rucoficina.regex' => 'El RUC debe contener solo números',
+        'oficin_diremail.email' => 'El formato del email es inválido',
+        'oficin_instit_codigo.exists' => 'La institución seleccionada no existe',
+        'oficin_tofici_codigo.exists' => 'El tipo de oficina seleccionado no existe',
+        'oficin_parroq_codigo.exists' => 'La parroquia seleccionada no existe'
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Datos de validación incorrectos',
+            'errors' => $validator->errors(),
+            'data' => null
+        ], 422);
+    }
+
+    try {
+        $oficina = Oficina::find($id);
+
+        if (!$oficina) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Oficina no encontrada',
+                'data' => null
+            ], 404);
+        }
+
+        DB::beginTransaction();
+
+        // ✅ FILTRAR CAMPOS OPCIONALES VACÍOS
+        $updateData = $this->filtrarCamposOpcionales($request->all());
+        
+        // Mantener valores existentes si no se proporcionan nuevos (solo para campos requeridos)
+        if (empty($updateData['oficin_codocntrl'])) {
+            $updateData['oficin_codocntrl'] = $oficina->oficin_codocntrl;
+        }
+        if (empty($updateData['oficin_fechaapertura'])) {
+            $updateData['oficin_fechaapertura'] = $oficina->oficin_fechaapertura;
+        }
+        if (empty($updateData['oficin_codresapertura'])) {
+            $updateData['oficin_codresapertura'] = $oficina->oficin_codresapertura;
+        }
+
+        Log::info("🔄 Actualizando oficina con datos filtrados:", [
+            'id' => $oficina->oficin_codigo,
+            'nombre_anterior' => $oficina->oficin_nombre,
+            'nombre_nuevo' => $updateData['oficin_nombre'],
+            'campos_incluidos' => array_keys($updateData)
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Datos de validación incorrectos',
-                'errors' => $validator->errors(),
-                'data' => null
-            ], 422);
-        }
+        $oficina->update($updateData);
 
-        try {
-            $oficina = Oficina::find($id);
+        Log::info("✅ Oficina actualizada:", [
+            'id' => $oficina->oficin_codigo,
+            'nombre' => $oficina->oficin_nombre
+        ]);
 
-            if (!$oficina) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Oficina no encontrada',
-                    'data' => null
-                ], 404);
-            }
+        // Obtener la oficina actualizada con relaciones
+        $oficinaCompleta = $this->getOficinaCompleta($oficina->oficin_codigo);
 
-            DB::beginTransaction();
+        DB::commit();
 
-            // ✅ PREPARAR DATOS PARA UPDATE
-            $updateData = $request->all();
-            
-            // Mantener valores existentes si no se proporcionan nuevos
-            if (empty($updateData['oficin_codocntrl'])) {
-                $updateData['oficin_codocntrl'] = $oficina->oficin_codocntrl;
-            }
-            if (empty($updateData['oficin_fechaapertura'])) {
-                $updateData['oficin_fechaapertura'] = $oficina->oficin_fechaapertura;
-            }
-            if (empty($updateData['oficin_codresapertura'])) {
-                $updateData['oficin_codresapertura'] = $oficina->oficin_codresapertura;
-            }
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Oficina actualizada exitosamente',
+            'data' => $oficinaCompleta
+        ]);
 
-            $oficina->update($updateData);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error("❌ Error actualizando oficina: " . $e->getMessage());
+        Log::error("❌ Stack trace: " . $e->getTraceAsString());
 
-            Log::info("✅ Oficina actualizada:", [
-                'id' => $oficina->oficin_codigo,
-                'nombre' => $oficina->oficin_nombre
-            ]);
-
-            // Obtener la oficina actualizada con relaciones
-            $oficinaCompleta = $this->getOficinaCompleta($oficina->oficin_codigo);
-
-            DB::commit();
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Oficina actualizada exitosamente',
-                'data' => $oficinaCompleta
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error("❌ Error actualizando oficina: " . $e->getMessage());
-            Log::error("❌ Stack trace: " . $e->getTraceAsString());
-
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error al actualizar oficina: ' . $e->getMessage(),
-                'data' => null
-            ], 500);
-        }
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al actualizar oficina: ' . $e->getMessage(),
+            'data' => null
+        ], 500);
     }
+}
 
     /**
      * Remove the specified resource from storage.

@@ -7,6 +7,7 @@ use App\Models\Config;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 
 class ConfigController extends Controller
 {
@@ -146,6 +147,11 @@ class ConfigController extends Controller
     public function update(Request $request, $id)
     {
         try {
+            Log::info("🔧 [ConfigController@update] Iniciando actualización", [
+                'id' => $id,
+                'datos_recibidos' => $request->all(),
+            ]);
+
             $config = Config::find($id);
             if (!$config) {
                 return response()->json([
@@ -155,7 +161,7 @@ class ConfigController extends Controller
             }
 
             $validator = Validator::make($request->all(), [
-                'conf_nom' => 'sometimes|required|string|max:100|unique:tbl_config,conf_nom,' . $id . ',conf_id',
+                'conf_nom' => "sometimes|required|string|max:100|unique:tbl_config,conf_nom,{$id},conf_id",
                 'conf_detalle' => 'sometimes|required|string|max:20',
             ]);
 
@@ -177,13 +183,33 @@ class ConfigController extends Controller
 
             DB::commit();
 
+            // Log de la respuesta final
+            Log::info("✅ [ConfigController@update] Configuración actualizada", [
+                'id' => $id,
+                'nueva_data' => [
+                    'conf_id' => $config->conf_id,
+                    'conf_nom' => $config->conf_nom,
+                    'conf_detalle' => $config->conf_detalle,
+                ]
+            ]);
+
+            // ✅ Usamos fresh con campos específicos o evitamos usarlo
             return response()->json([
                 'status' => 'success',
                 'message' => 'Configuración actualizada exitosamente',
-                'data' => $config->fresh()->getInfoBasica()
+                'data' => [
+                    'conf_id' => $config->conf_id,
+                    'conf_nom' => $config->conf_nom,
+                    'conf_detalle' => $config->conf_detalle,
+                ]
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error("❌ [ConfigController@update] Error interno", [
+                'id' => $id,
+                'mensaje' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'status' => 'error',
                 'message' => 'Error al actualizar configuración: ' . $e->getMessage()

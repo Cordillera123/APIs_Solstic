@@ -11,8 +11,477 @@ use Illuminate\Support\Facades\Log;
 class MenuButtonPermissionsController extends Controller
 {
     /**
+     * ✅ NUEVO: Obtener permisos de botones para un submenu específico del usuario actual
+     */
+    public function getMySubmenuButtonPermissions($menuId, $submenuId)
+    {
+        try {
+            $userId = Auth::id();
+            
+            if (!$userId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado',
+                    'botones_permitidos' => []
+                ], 401);
+            }
+
+            Log::info("🔍 getMySubmenuButtonPermissions: Usuario {$userId} consultando menú {$menuId} submenu {$submenuId}");
+
+            // PASO 1: Verificar que el submenu existe y está activo
+            $submenu = DB::table('tbl_sub')
+                ->where('sub_id', $submenuId)
+                ->where('sub_activo', true)
+                ->first();
+
+            if (!$submenu) {
+                Log::warning("❌ Submenu {$submenuId} no encontrado o inactivo");
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Submenu no encontrado',
+                    'botones_permitidos' => []
+                ], 404);
+            }
+
+            Log::info("✅ Submenu encontrado: {$submenu->sub_nom}");
+
+            // PASO 2: Obtener información del usuario y su perfil
+            $usuario = DB::table('tbl_usu')
+                ->where('usu_id', $userId)
+                ->first();
+
+            if (!$usuario || !$usuario->per_id) {
+                Log::warning("❌ Usuario {$userId} sin perfil asignado");
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario sin perfil asignado',
+                    'botones_permitidos' => []
+                ], 400);
+            }
+
+            Log::info("👤 Usuario: ID={$userId}, Perfil={$usuario->per_id}");
+
+            // PASO 3: Verificar si el usuario tiene acceso al submenu
+            $tieneAccesoSubmenu = DB::table('tbl_perm_perfil')
+                ->where('per_id', $usuario->per_id)
+                ->where('men_id', $menuId)
+                ->where('sub_id', $submenuId)
+                ->whereNull('opc_id')
+                ->where('perm_per_activo', true)
+                ->exists();
+
+            if (!$tieneAccesoSubmenu) {
+                Log::warning("❌ Usuario {$userId} sin acceso al submenu {$submenuId}");
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sin permisos para acceder a este submenu',
+                    'botones_permitidos' => []
+                ], 403);
+            }
+
+            Log::info("✅ Usuario tiene acceso al submenu");
+
+            // PASO 4: Verificar si el submenu es ventana directa
+            if (!$submenu->sub_ventana_directa) {
+                Log::info("ℹ️ Submenu no es ventana directa, devolviendo vacío");
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Submenu no es ventana directa',
+                    'botones_permitidos' => [],
+                    'submenu_info' => [
+                        'men_id' => $menuId,
+                        'sub_id' => $submenu->sub_id,
+                        'sub_nom' => $submenu->sub_nom,
+                        'sub_ventana_directa' => false
+                    ]
+                ]);
+            }
+
+            // ✅ PASO 5 CORREGIDO: Obtener botones del submenu con permisos
+            $botonesConPermisos = DB::table('tbl_bot as b')
+                ->join('tbl_sub_bot as sb', 'b.bot_id', '=', 'sb.bot_id')
+                ->leftJoin('tbl_ico as i', 'b.ico_id', '=', 'i.ico_id')
+                ->leftJoin('tbl_perm_bot_perfil as pbp', function($join) use ($usuario, $menuId, $submenuId) {
+                    $join->on('b.bot_id', '=', 'pbp.bot_id')
+                         ->where('pbp.per_id', '=', $usuario->per_id)
+                         ->where('pbp.men_id', '=', $menuId)
+                         ->where('pbp.sub_id', '=', $submenuId)
+                         ->whereNull('pbp.opc_id')
+                         ->where('pbp.perm_bot_per_activo', '=', true);
+                })
+                // Verificar personalizaciones del usuario
+                ->leftJoin('tbl_perm_bot_usuario as pbu', function($join) use ($userId, $menuId, $submenuId) {
+                    $join->on('b.bot_id', '=', 'pbu.bot_id')
+                         ->where('pbu.usu_id', '=', $userId)
+                         ->where('pbu.men_id', '=', $menuId)
+                         ->where('pbu.sub_id', '=', $submenuId)
+                         ->whereNull('pbu.opc_id')
+                         ->where('pbu.perm_bot_usu_activo', '=', true);
+                })
+                // ✅ CORRECCIÓN CRÍTICA: Solo filtrar por sub_id, NO por men_id
+                ->where('sb.sub_id', $submenuId)
+                ->where('sb.sub_bot_activo', true)
+                ->where('b.bot_activo', true)
+                ->select(
+                    'b.bot_id',
+                    'b.bot_nom',
+                    'b.bot_codigo',
+                    'b.bot_color',
+                    'b.bot_tooltip',
+                    'b.bot_confirmacion',
+                    'b.bot_mensaje_confirmacion',
+                    'i.ico_nom as ico_nombre',
+                    'sb.sub_bot_orden',
+                    'b.bot_orden',
+                    // Calcular permiso final (usuario override perfil)
+                    DB::raw("
+                        CASE 
+                            WHEN pbu.perm_tipo = 'C' THEN true
+                            WHEN pbu.perm_tipo = 'D' THEN false
+                            WHEN pbp.bot_id IS NOT NULL THEN true
+                            ELSE false
+                        END as has_permission
+                    "),
+                    'pbp.bot_id as permiso_perfil',
+                    'pbu.perm_tipo as customizacion_usuario'
+                )
+                ->orderBy('sb.sub_bot_orden')
+                ->orderBy('b.bot_orden')
+                ->get();
+
+            Log::info("🔘 Botones encontrados para submenu: " . $botonesConPermisos->count());
+
+            // PASO 6: Filtrar solo botones con permiso y formatear respuesta
+            $botonesPermitidos = $botonesConPermisos
+                ->where('has_permission', true)
+                ->map(function($boton) {
+                    return [
+                        'bot_id' => $boton->bot_id,
+                        'bot_nom' => $boton->bot_nom,
+                        'bot_codigo' => $boton->bot_codigo,
+                        'bot_color' => $boton->bot_color,
+                        'bot_tooltip' => $boton->bot_tooltip,
+                        'bot_confirmacion' => (bool) $boton->bot_confirmacion,
+                        'bot_mensaje_confirmacion' => $boton->bot_mensaje_confirmacion,
+                        'ico_nombre' => $boton->ico_nombre,
+                        'has_permission' => true,
+                        'permission_source' => $boton->customizacion_usuario ? 'usuario' : 'perfil'
+                    ];
+                })
+                ->values()
+                ->toArray();
+
+            Log::info("✅ Permisos de submenu procesados", [
+                'menu_id' => $menuId,
+                'submenu_id' => $submenuId,
+                'total_botones' => $botonesConPermisos->count(),
+                'botones_permitidos' => count($botonesPermitidos),
+                'botones_permitidos_codigos' => collect($botonesPermitidos)->pluck('bot_codigo')->toArray()
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'success' => true,
+                'message' => 'Permisos de submenu obtenidos correctamente',
+                'botones_permitidos' => $botonesPermitidos,
+                'submenu_info' => [
+                    'men_id' => $menuId,
+                    'sub_id' => $submenu->sub_id,
+                    'sub_nom' => $submenu->sub_nom,
+                    'sub_ventana_directa' => (bool) $submenu->sub_ventana_directa,
+                    'sub_componente' => $submenu->sub_componente
+                ],
+                'user_info' => [
+                    'usu_id' => $userId,
+                    'per_id' => $usuario->per_id
+                ],
+                'debug_info' => [
+                    'total_botones_submenu' => $botonesConPermisos->count(),
+                    'botones_con_permiso' => count($botonesPermitidos),
+                    'tiene_acceso_submenu' => $tieneAccesoSubmenu
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ Error en getMySubmenuButtonPermissions", [
+                'user_id' => $userId ?? 'unknown',
+                'menu_id' => $menuId,
+                'submenu_id' => $submenuId,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'error_detail' => config('app.debug') ? $e->getMessage() : 'Error interno',
+                'botones_permitidos' => []
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ NUEVO: Verificar permiso específico de botón para submenu
+     */
+    public function checkSubmenuButtonPermission(Request $request)
+    {
+        try {
+            $request->validate([
+                'men_id' => 'required|integer',
+                'sub_id' => 'required|integer',
+                'bot_codigo' => 'required|string'
+            ]);
+
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'has_permission' => false,
+                    'message' => 'Usuario no autenticado'
+                ], 401);
+            }
+
+            $menuId = $request->men_id;
+            $submenuId = $request->sub_id;
+            $botCodigo = $request->bot_codigo;
+
+            Log::info("🔍 Verificando permiso específico de submenu", [
+                'user_id' => $userId,
+                'menu_id' => $menuId,
+                'submenu_id' => $submenuId,
+                'bot_codigo' => $botCodigo
+            ]);
+
+            // Obtener información del usuario
+            $usuario = DB::table('tbl_usu')->where('usu_id', $userId)->first();
+            if (!$usuario || !$usuario->per_id) {
+                return response()->json([
+                    'has_permission' => false,
+                    'message' => 'Usuario sin perfil asignado'
+                ]);
+            }
+
+            // Verificar permiso híbrido para submenu
+            $hasPermission = DB::table('tbl_bot as b')
+                ->join('tbl_sub_bot as sb', 'b.bot_id', '=', 'sb.bot_id')
+                ->leftJoin('tbl_perm_bot_perfil as pbp', function($join) use ($usuario, $menuId, $submenuId) {
+                    $join->on('b.bot_id', '=', 'pbp.bot_id')
+                         ->where('pbp.per_id', '=', $usuario->per_id)
+                         ->where('pbp.men_id', '=', $menuId)
+                         ->where('pbp.sub_id', '=', $submenuId)
+                         ->whereNull('pbp.opc_id')
+                         ->where('pbp.perm_bot_per_activo', '=', true);
+                })
+                ->leftJoin('tbl_perm_bot_usuario as pbu', function($join) use ($userId, $menuId, $submenuId) {
+                    $join->on('b.bot_id', '=', 'pbu.bot_id')
+                         ->where('pbu.usu_id', '=', $userId)
+                         ->where('pbu.men_id', '=', $menuId)
+                         ->where('pbu.sub_id', '=', $submenuId)
+                         ->whereNull('pbu.opc_id')
+                         ->where('pbu.perm_bot_usu_activo', '=', true);
+                })
+                ->where('b.bot_codigo', $botCodigo)
+                ->where('sb.men_id', $menuId)
+                ->where('sb.sub_id', $submenuId)
+                ->where('b.bot_activo', true)
+                ->where('sb.sub_bot_activo', true)
+                ->selectRaw("
+                    CASE 
+                        WHEN pbu.perm_tipo = 'C' THEN true
+                        WHEN pbu.perm_tipo = 'D' THEN false
+                        WHEN pbp.bot_id IS NOT NULL THEN true
+                        ELSE false
+                    END as has_permission
+                ")
+                ->value('has_permission');
+
+            return response()->json([
+                'has_permission' => (bool) $hasPermission,
+                'men_id' => $menuId,
+                'sub_id' => $submenuId,
+                'bot_codigo' => $botCodigo,
+                'user_id' => $userId,
+                'profile_id' => $usuario->per_id
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ Error verificando permiso de botón de submenu", [
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+                'request_data' => $request->all()
+            ]);
+
+            return response()->json([
+                'has_permission' => false,
+                'message' => 'Error interno del servidor'
+            ], 500);
+        }
+    }
+    /**
+     * ✅ SOLUCIÓN RÁPIDA: Tratar submenus como menús directos
+     * Agregar este método al final de tu clase MenuButtonPermissionsController
+     */
+    public function getMySubmenuAsMenuPermissions($submenuId)
+    {
+        try {
+            $userId = Auth::id();
+            
+            if (!$userId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado',
+                    'botones_permitidos' => []
+                ], 401);
+            }
+
+            Log::info("🔍 getMySubmenuAsMenuPermissions: Usuario {$userId} consultando submenu {$submenuId} como menú");
+
+            // Obtener información del usuario y su perfil
+            $usuario = DB::table('tbl_usu')
+                ->where('usu_id', $userId)
+                ->first();
+
+            if (!$usuario || !$usuario->per_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario sin perfil asignado',
+                    'botones_permitidos' => []
+                ], 400);
+            }
+
+            // Verificar que el submenu existe
+            $submenu = DB::table('tbl_sub')
+                ->where('sub_id', $submenuId)
+                ->where('sub_activo', true)
+                ->first();
+
+            if (!$submenu) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Submenu no encontrado',
+                    'botones_permitidos' => []
+                ], 404);
+            }
+
+            // ✅ MÉTODO SIMPLIFICADO: Buscar botones directamente por sub_id
+            $botonesConPermisos = DB::table('tbl_bot as b')
+                ->join('tbl_sub_bot as sb', 'b.bot_id', '=', 'sb.bot_id')
+                ->leftJoin('tbl_ico as i', 'b.ico_id', '=', 'i.ico_id')
+                ->leftJoin('tbl_perm_bot_perfil as pbp', function($join) use ($usuario, $submenuId) {
+                    $join->on('b.bot_id', '=', 'pbp.bot_id')
+                         ->where('pbp.per_id', '=', $usuario->per_id)
+                         ->where('pbp.sub_id', '=', $submenuId)
+                         ->whereNull('pbp.opc_id')
+                         ->where('pbp.perm_bot_per_activo', '=', true);
+                })
+                ->leftJoin('tbl_perm_bot_usuario as pbu', function($join) use ($userId, $submenuId) {
+                    $join->on('b.bot_id', '=', 'pbu.bot_id')
+                         ->where('pbu.usu_id', '=', $userId)
+                         ->where('pbu.sub_id', '=', $submenuId)
+                         ->whereNull('pbu.opc_id')
+                         ->where('pbu.perm_bot_usu_activo', '=', true);
+                })
+                ->where('sb.sub_id', $submenuId)
+                ->where('sb.sub_bot_activo', true)
+                ->where('b.bot_activo', true)
+                ->select(
+                    'b.bot_id',
+                    'b.bot_nom',
+                    'b.bot_codigo',
+                    'b.bot_color',
+                    'b.bot_tooltip',
+                    'b.bot_confirmacion',
+                    'b.bot_mensaje_confirmacion',
+                    'i.ico_nom as ico_nombre',
+                    'sb.sub_bot_orden',
+                    'b.bot_orden',
+                    DB::raw("
+                        CASE 
+                            WHEN pbu.perm_tipo = 'C' THEN true
+                            WHEN pbu.perm_tipo = 'D' THEN false
+                            WHEN pbp.bot_id IS NOT NULL THEN true
+                            ELSE false
+                        END as has_permission
+                    "),
+                    'pbp.bot_id as permiso_perfil',
+                    'pbu.perm_tipo as customizacion_usuario'
+                )
+                ->orderBy('sb.sub_bot_orden')
+                ->orderBy('b.bot_orden')
+                ->get();
+
+            $botonesPermitidos = $botonesConPermisos
+                ->where('has_permission', true)
+                ->map(function($boton) {
+                    return [
+                        'bot_id' => $boton->bot_id,
+                        'bot_nom' => $boton->bot_nom,
+                        'bot_codigo' => $boton->bot_codigo,
+                        'bot_color' => $boton->bot_color,
+                        'bot_tooltip' => $boton->bot_tooltip,
+                        'bot_confirmacion' => (bool) $boton->bot_confirmacion,
+                        'bot_mensaje_confirmacion' => $boton->bot_mensaje_confirmacion,
+                        'ico_nombre' => $boton->ico_nombre,
+                        'has_permission' => true,
+                        'permission_source' => $boton->customizacion_usuario ? 'usuario' : 'perfil'
+                    ];
+                })
+                ->values()
+                ->toArray();
+
+            Log::info("✅ Permisos de submenu procesados", [
+                'submenu_id' => $submenuId,
+                'total_botones' => $botonesConPermisos->count(),
+                'botones_permitidos' => count($botonesPermitidos),
+                'botones_permitidos_codigos' => collect($botonesPermitidos)->pluck('bot_codigo')->toArray()
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'success' => true,
+                'message' => 'Permisos obtenidos correctamente',
+                'botones_permitidos' => $botonesPermitidos,
+                'menu_info' => [
+                    'men_id' => $submenuId,
+                    'men_nom' => $submenu->sub_nom,
+                    'men_ventana_directa' => (bool) $submenu->sub_ventana_directa,
+                    'men_componente' => $submenu->sub_componente
+                ],
+                'user_info' => [
+                    'usu_id' => $userId,
+                    'per_id' => $usuario->per_id
+                ],
+                'debug_info' => [
+                    'total_botones_submenu' => $botonesConPermisos->count(),
+                    'botones_con_permiso' => count($botonesPermitidos),
+                    'submenu_tratado_como_menu' => true
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ Error en getMySubmenuAsMenuPermissions", [
+                'user_id' => $userId ?? 'unknown',
+                'submenu_id' => $submenuId,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'status' => 'error',
+                'message' => 'Error interno del servidor',
+                'error_detail' => config('app.debug') ? $e->getMessage() : 'Error interno',
+                'botones_permitidos' => []
+            ], 500);
+        }
+    }
+
+
+    /**
      * Obtener permisos de botones para un menú específico del usuario actual
-     * VERSIÓN CORREGIDA USANDO SOLO QUERY BUILDER
+     * VERSIÓN ORIGINAL MANTENIDA PARA COMPATIBILIDAD
      */
     public function getMyMenuButtonPermissions($menuId)
     {
@@ -178,6 +647,7 @@ class MenuButtonPermissionsController extends Controller
 
             return response()->json([
                 'success' => true,
+                'status' => 'success',
                 'message' => 'Permisos obtenidos correctamente',
                 'botones_permitidos' => $botonesPermitidos,
                 'menu_info' => [
@@ -208,6 +678,7 @@ class MenuButtonPermissionsController extends Controller
 
             return response()->json([
                 'success' => false,
+                'status' => 'error',
                 'message' => 'Error interno del servidor',
                 'error_detail' => config('app.debug') ? $e->getMessage() : 'Error interno',
                 'botones_permitidos' => []
@@ -477,3 +948,5 @@ class MenuButtonPermissionsController extends Controller
         }
     }
 }
+
+

@@ -116,6 +116,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/check-menu-button-permission', [MenuButtonPermissionsController::class, 'checkMenuButtonPermission']);
     Route::get('/my-permissions', [MenuButtonPermissionsController::class, 'getMyPermissions']);
     Route::get('/menu-button-info/{perfilId?}', [MenuButtonPermissionsController::class, 'getMenuButtonInfo']);
+    Route::get('/submenu-button-permissions/{menuId}/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuButtonPermissions'])
+        ->name('submenu.button.permissions');
+    Route::post('/check-submenu-button-permission', [MenuButtonPermissionsController::class, 'checkSubmenuButtonPermission'])
+        ->name('submenu.button.permission.check');
+    Route::get('/menu-button-permissions/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
+    ->name('submenu.as.menu.permissions');
+    Route::get('/submenu-button-permissions/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
+    ->name('submenu.as.menu.permissions');
+
+
 
     // === RUTAS DE PERMISOS DE BOTONES (ADMINISTRACIÓN) ===
     Route::get('/button-permissions/profiles/{perfilId}/direct-windows', function ($perfilId) {
@@ -269,13 +279,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // ✅ NUEVAS RUTAS PARA OFICINAS EN USUARIOS
     Route::post('/usuarios/{id}/asignar-oficina', [UsuarioController::class, 'asignarOficina']);
     Route::delete('/usuarios/{id}/remover-oficina', [UsuarioController::class, 'removerOficina']);
-    
+
     // ✅ AQUÍ VAN LAS NUEVAS RUTAS DEL USUARIO LOGUEADO
     Route::get('/usuario/me', [UsuarioController::class, 'me']);
     Route::get('/usuario/me/basica', [UsuarioController::class, 'meBasica']);
     Route::get('/usuario/me/institucion', [UsuarioController::class, 'meInstitucion']);
     Route::get('/usuario/me/oficina', [UsuarioController::class, 'meOficina']);
-   
+
     // === GESTIÓN DE PERFILES/ROLES ===
     Route::apiResource('perfiles', PerfilController::class);
     Route::get('/perfiles/{id}/usuarios', [PerfilController::class, 'getUsuarios']);

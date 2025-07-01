@@ -79,7 +79,7 @@ class ConfigController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'conf_nom' => 'required|string|max:100|unique:tbl_config,conf_nom',
-            'conf_detalle' => 'required|string|max:20',
+            'conf_detalle' => 'required|string',
         ]);
 
         if ($validator->fails()) {
@@ -162,7 +162,7 @@ class ConfigController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'conf_nom' => "sometimes|required|string|max:100|unique:tbl_config,conf_nom,{$id},conf_id",
-                'conf_detalle' => 'sometimes|required|string|max:20',
+                'conf_detalle' => 'sometimes|required|string',
             ]);
 
             if ($validator->fails()) {
@@ -247,4 +247,64 @@ class ConfigController extends Controller
             ], 500);
         }
     }
+    /**
+ * ✅ NUEVO: Actualizar configuración por nombre
+ */
+public function updateByName(Request $request)
+{
+    try {
+        $request->validate([
+            'conf_nom' => 'required|string|max:100',
+            'conf_detalle' => 'required|string'
+        ]);
+
+        $config = Config::where('conf_nom', $request->conf_nom)->first();
+
+        if ($config) {
+            $config->update(['conf_detalle' => $request->conf_detalle]);
+        } else {
+            $config = Config::create([
+                'conf_nom' => $request->conf_nom,
+                'conf_detalle' => $request->conf_detalle
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Configuración actualizada correctamente',
+            'data' => $config->getInfoBasica()
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al actualizar configuración: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * ✅ NUEVO: Obtener por nombre con filtro
+ */
+public function getByNameFilter(Request $request)
+{
+    try {
+        $configName = $request->get('conf_nom');
+        
+        if (!$configName) {
+            return $this->index($request);
+        }
+
+        $config = Config::where('conf_nom', $configName)->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $config
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al buscar configuración: ' . $e->getMessage()
+        ], 500);
+    }
+}
 }

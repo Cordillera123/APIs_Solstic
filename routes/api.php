@@ -26,8 +26,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
-// Rutas de configuración
-Route::apiResource('configs', ConfigController::class);
+
 
 // Rutas públicas
 Route::post('/login', [AuthController::class, 'login']);
@@ -35,6 +34,14 @@ Route::post('/login', [AuthController::class, 'login']);
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
 
+    Route::prefix('configs')->group(function () {
+        Route::get('/', [ConfigController::class, 'getByNameFilter']);
+        Route::post('/', [ConfigController::class, 'store']);
+        Route::get('/{id}', [ConfigController::class, 'show']);
+        Route::put('/{id}', [ConfigController::class, 'update']);
+        Route::delete('/{id}', [ConfigController::class, 'destroy']);
+        Route::patch('/update-by-name', [ConfigController::class, 'updateByName']);
+    });
     // === RUTAS DE AUTENTICACIÓN ===
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);

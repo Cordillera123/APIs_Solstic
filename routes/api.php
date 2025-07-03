@@ -121,9 +121,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/check-submenu-button-permission', [MenuButtonPermissionsController::class, 'checkSubmenuButtonPermission'])
         ->name('submenu.button.permission.check');
     Route::get('/menu-button-permissions/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
-    ->name('submenu.as.menu.permissions');
+        ->name('submenu.as.menu.permissions');
     Route::get('/submenu-button-permissions/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
-    ->name('submenu.as.menu.permissions');
+        ->name('submenu.as.menu.permissions');
 
 
 
@@ -280,7 +280,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/usuarios/{id}/asignar-oficina', [UsuarioController::class, 'asignarOficina']);
     Route::delete('/usuarios/{id}/remover-oficina', [UsuarioController::class, 'removerOficina']);
 
-    // ✅ AQUÍ VAN LAS NUEVAS RUTAS DEL USUARIO LOGUEADO
+
     Route::get('/usuario/me', [UsuarioController::class, 'me']);
     Route::get('/usuario/me/basica', [UsuarioController::class, 'meBasica']);
     Route::get('/usuario/me/institucion', [UsuarioController::class, 'meInstitucion']);
@@ -322,6 +322,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}', [OficinaController::class, 'destroy']);  // DELETE /api/oficinas/{id}
         Route::get('/{id}/usuarios', [OficinaController::class, 'usuarios']); // GET /api/oficinas/{id}/usuarios
     });
+    Route::get('/oficinas/stats', [OficinaController::class, 'stats']);
+    Route::get('/oficinas/activas', [OficinaController::class, 'activas']);
+    Route::get('/oficinas/listar', [OficinaController::class, 'listar']);
+    Route::get('/oficinas/by-institucion/{institucionId}', [OficinaController::class, 'byInstitucion']);
+    Route::get('/oficinas/by-tipo/{tipoId}', [OficinaController::class, 'byTipo']);
+    Route::get('/oficinas/by-parroquia/{parroquiaId}', [OficinaController::class, 'byParroquia']);
+    Route::post('/oficinas/search', [OficinaController::class, 'search']);
+    Route::get('/oficinas/{id}/usuarios', [OficinaController::class, 'usuarios']);
+
+    // Ruta resource (debe ir después de las rutas específicas)
+    Route::resource('oficinas', OficinaController::class);
 
     // === GESTIÓN DE PERMISOS DE BOTONES POR USUARIO ===
     Route::get('/user-button-permissions/profiles/{perfilId}/users', [UserButtonPermissionController::class, 'getUsersByProfile']);

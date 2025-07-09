@@ -276,7 +276,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/usuarios/{id}/active-permissions', [UsuarioController::class, 'getActivePermissions']);
     Route::post('/usuarios/{id}/copy-permissions', [UsuarioController::class, 'copyUserPermissions']);
 
-    // ✅ NUEVAS RUTAS PARA OFICINAS EN USUARIOS
+    Route::get('/usuarios/perfiles-permitidos', [UsuarioController::class, 'getPerfilesPermitidos']);
+Route::get('/usuarios/perfiles-para-filtro', [UsuarioController::class, 'getPerfilesParaFiltro']);
+Route::post('/usuarios/{id}/asignar-perfil-visibilidad', [UsuarioController::class, 'asignarPerfilVisibilidad']);
+// ✅ AGREGAR ESTAS RUTAS EN LA SECCIÓN DE GESTIÓN DE USUARIOS:
+Route::get('/usuarios/{id}/perfiles-visibles', [UsuarioController::class, 'getPerfilesVisiblesUsuario']);
+Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'getEstadisticasVisibilidad']);    
+// ✅ NUEVAS RUTAS PARA OFICINAS EN USUARIOS
     Route::post('/usuarios/{id}/asignar-oficina', [UsuarioController::class, 'asignarOficina']);
     Route::delete('/usuarios/{id}/remover-oficina', [UsuarioController::class, 'removerOficina']);
 

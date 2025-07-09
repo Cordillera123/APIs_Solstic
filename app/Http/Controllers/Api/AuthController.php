@@ -73,7 +73,12 @@ class AuthController extends Controller
                 'message' => 'Credenciales inválidas'
             ], 401);
         }
-        
+        // ✅ AGREGAR: Verificar que el usuario no esté deshabilitado
+if ($usuario->usu_deshabilitado === true) {
+    return response()->json([
+        'message' => 'Su cuenta está desactivada. Contacte al administrador'
+    ], 403);
+}
         // Login exitoso
         // Crear token
         $token = $usuario->createToken('auth_token')->plainTextToken;
@@ -118,6 +123,13 @@ class AuthController extends Controller
     public function user(Request $request)
     {
         $user = $request->user();
+        $usuarioActual = Usuario::find($user->usu_id);
+if (!$usuarioActual || $usuarioActual->usu_deshabilitado === true) {
+    return response()->json([
+        'message' => 'Su sesión ha sido revocada por el administrador',
+        'error' => 'USER_DISABLED'
+    ], 403);
+}
         $userInfo = DB::table('tbl_usu')
             ->join('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
             ->select(
@@ -159,11 +171,13 @@ public function getUserMenus($userId)
     error_log('DEBUG 1 - Iniciando getUserMenus para usuario: ' . $userId);
     
     // Obtener el perfil del usuario
-    $usuario = DB::table('tbl_usu')
-        ->join('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
-        ->select('tbl_per.per_id', 'tbl_usu.usu_id', 'tbl_per.per_nom', 'tbl_usu.usu_nom', 'tbl_usu.usu_ape')
-        ->where('tbl_usu.usu_id', $userId)
-        ->first();
+   // Cambiar la consulta inicial (línea ~142):
+$usuario = DB::table('tbl_usu')
+    ->join('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
+    ->select('tbl_per.per_id', 'tbl_usu.usu_id', 'tbl_per.per_nom', 'tbl_usu.usu_nom', 'tbl_usu.usu_ape', 'tbl_usu.usu_deshabilitado')
+    ->where('tbl_usu.usu_id', $userId)
+    ->where('tbl_usu.usu_deshabilitado', '!=', true) // ✅ AGREGAR ESTA LÍNEA
+    ->first();
     
     error_log('DEBUG 1 - Usuario encontrado: ' . json_encode($usuario));
     

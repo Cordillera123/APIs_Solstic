@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Usuario;
+use App\Models\PerfilVisibilidad;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -25,16 +26,16 @@ public function index(Request $request)
         $search = $request->get('search', '');
         $perfilId = $request->get('per_id', ''); 
         $estadoId = $request->get('estado_id', '');
-        $oficinaCodigo = $request->get('oficina_codigo', ''); // ✅ FILTRO OFICINA
-        $sinOficina = $request->boolean('sin_oficina', false); // ✅ FILTRO SIN OFICINA
+        $oficinaCodigo = $request->get('oficina_codigo', '');
+        $sinOficina = $request->boolean('sin_oficina', false);
         $incluirDeshabilitados = $request->boolean('incluir_deshabilitados', false);
 
         $query = DB::table('tbl_usu')
             ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
             ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
-            ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo') // ✅ CORREGIDO
-            ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo') // ✅ CORREGIDO
-            ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo') // ✅ CORREGIDO
+            ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+            ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo')
+            ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo')
             ->leftJoin('tbl_usu as creador', 'tbl_usu.usu_creado_por', '=', 'creador.usu_id')
             ->select(
                 'tbl_usu.usu_id',
@@ -60,7 +61,6 @@ public function index(Request $request)
                 'creador.usu_nom as creado_por_nombre',
                 'tbl_usu.usu_cre',
                 'tbl_usu.usu_edi',
-                // ✅ CAMPOS DE OFICINA CORREGIDOS
                 'tbl_usu.oficin_codigo',
                 'gaf_oficin.oficin_nombre as oficina_nombre',
                 'gaf_tofici.tofici_descripcion as tipo_oficina',
@@ -68,7 +68,27 @@ public function index(Request $request)
                 DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
             );
 
-        // Filtros
+        // ✅ FILTRO: Excluir al usuario autenticado del listado
+        if (Auth::check() && Auth::user()) {
+            $currentUser = Auth::user();
+            $query->where('tbl_usu.usu_id', '!=', $currentUser->usu_id);
+            Log::info("🔒 Ocultando usuario actual del listado: {$currentUser->usu_id} - {$currentUser->usu_cor}");
+
+            // ✅ NUEVO: Filtrar por perfiles que el usuario autenticado puede ver
+            $perfilesVisibles = $this->getPerfilesVisiblesPorUsuario($currentUser->usu_id);
+            
+            if ($perfilesVisibles->isNotEmpty()) {
+                $perfilesIds = $perfilesVisibles->pluck('per_id')->toArray();
+                $query->whereIn('tbl_usu.per_id', $perfilesIds);
+                Log::info("🔒 Filtro de perfiles aplicado para usuario {$currentUser->usu_id}: " . implode(',', $perfilesIds));
+            } else {
+                // Si no tiene permisos para ver ningún perfil, no mostrar usuarios
+                $query->whereRaw('1 = 0'); // Condición que nunca se cumple
+                Log::info("🔒 Usuario {$currentUser->usu_id} sin permisos para ver perfiles");
+            }
+        }
+
+        // Filtros existentes
         if (!$incluirDeshabilitados) {
             $query->where('tbl_usu.usu_deshabilitado', false);
         }
@@ -88,7 +108,7 @@ public function index(Request $request)
                     ->orWhere('tbl_usu.usu_cor', 'ILIKE', "%{$search}%")
                     ->orWhere('tbl_usu.usu_ced', 'ILIKE', "%{$search}%")
                     ->orWhere('tbl_per.per_nom', 'ILIKE', "%{$search}%")
-                    ->orWhere('gaf_oficin.oficin_nombre', 'ILIKE', "%{$search}%"); // ✅ CORREGIDO
+                    ->orWhere('gaf_oficin.oficin_nombre', 'ILIKE', "%{$search}%");
             });
         }
 
@@ -115,6 +135,159 @@ public function index(Request $request)
             'status' => 'error',
             'message' => 'Error al obtener usuarios: ' . $e->getMessage(),
             'data' => null
+        ], 500);
+    }
+}
+/**
+ * Obtener perfiles para el filtro (solo los que el usuario puede ver)
+ */
+public function getPerfilesParaFiltro(Request $request)
+{
+    try {
+        $user = $request->user();
+        
+        if (!$user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no autenticado',
+                'data' => []
+            ], 401);
+        }
+
+        $perfilesPermitidos = $this->getPerfilesVisiblesPorUsuario($user->usu_id);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Perfiles para filtro obtenidos correctamente',
+            'data' => $perfilesPermitidos
+        ]);
+    } catch (\Exception $e) {
+        Log::error("❌ Error obteniendo perfiles para filtro: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al obtener perfiles para filtro',
+            'data' => []
+        ], 500);
+    }
+}
+/**
+ * Obtener perfiles visibles para un usuario específico
+ */
+public function getPerfilesVisiblesUsuario($usuarioId)
+{
+    try {
+        $usuario = Usuario::find($usuarioId);
+        
+        if (!$usuario) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no encontrado',
+                'data' => []
+            ], 404);
+        }
+
+        $perfilesVisibles = DB::table('tbl_per')
+            ->join('tbl_perm_perfil_visibilidad', 'tbl_per.per_id', '=', 'tbl_perm_perfil_visibilidad.per_id_visible')
+            ->where('tbl_perm_perfil_visibilidad.usu_id', $usuarioId)
+            ->where('tbl_perm_perfil_visibilidad.perm_per_vis_activo', true)
+            ->where('tbl_per.per_activo', true)
+            ->select(
+                'tbl_per.per_id', 
+                'tbl_per.per_nom',
+                'tbl_per.per_descripcion',
+                'tbl_perm_perfil_visibilidad.perm_per_vis_cre as asignado_fecha'
+            )
+            ->orderBy('tbl_per.per_nom')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Perfiles visibles obtenidos correctamente',
+            'data' => $perfilesVisibles
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error("❌ Error obteniendo perfiles visibles del usuario {$usuarioId}: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al obtener perfiles visibles',
+            'data' => []
+        ], 500);
+    }
+}
+/**
+ * Obtener estadísticas de visibilidad de perfiles
+ */
+public function getEstadisticasVisibilidad()
+{
+    try {
+        Log::info("📊 Obteniendo estadísticas de visibilidad de perfiles");
+
+        $stats = [
+            'total_usuarios' => DB::table('tbl_usu')->where('usu_deshabilitado', false)->count(),
+            
+            'usuarios_con_visibilidad_configurada' => DB::table('tbl_perm_perfil_visibilidad')
+                ->where('perm_per_vis_activo', true)
+                ->distinct('usu_id')
+                ->count('usu_id'),
+                
+            'total_asignaciones_visibilidad' => DB::table('tbl_perm_perfil_visibilidad')
+                ->where('perm_per_vis_activo', true)
+                ->count(),
+                
+            'perfiles_mas_visibles' => DB::table('tbl_per')
+                ->join('tbl_perm_perfil_visibilidad', 'tbl_per.per_id', '=', 'tbl_perm_perfil_visibilidad.per_id_visible')
+                ->where('tbl_perm_perfil_visibilidad.perm_per_vis_activo', true)
+                ->where('tbl_per.per_activo', true)
+                ->select(
+                    'tbl_per.per_id',
+                    'tbl_per.per_nom',
+                    DB::raw('COUNT(*) as usuarios_pueden_ver')
+                )
+                ->groupBy('tbl_per.per_id', 'tbl_per.per_nom')
+                ->orderBy('usuarios_pueden_ver', 'desc')
+                ->limit(10)
+                ->get(),
+                
+            'usuarios_sin_visibilidad' => DB::table('tbl_usu')
+                ->leftJoin('tbl_perm_perfil_visibilidad', function($join) {
+                    $join->on('tbl_usu.usu_id', '=', 'tbl_perm_perfil_visibilidad.usu_id')
+                         ->where('tbl_perm_perfil_visibilidad.perm_per_vis_activo', '=', true);
+                })
+                ->where('tbl_usu.usu_deshabilitado', false)
+                ->whereNull('tbl_perm_perfil_visibilidad.usu_id')
+                ->count(),
+                
+            'promedio_perfiles_por_usuario' => round(
+                DB::table('tbl_perm_perfil_visibilidad')
+                    ->where('perm_per_vis_activo', true)
+                    ->count() / 
+                max(1, DB::table('tbl_perm_perfil_visibilidad')
+                    ->where('perm_per_vis_activo', true)
+                    ->distinct('usu_id')
+                    ->count('usu_id')), 2
+            )
+        ];
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Estadísticas de visibilidad obtenidas correctamente',
+            'data' => $stats
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error("❌ Error obteniendo estadísticas de visibilidad: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al obtener estadísticas de visibilidad',
+            'data' => [
+                'total_usuarios' => 0,
+                'usuarios_con_visibilidad_configurada' => 0,
+                'total_asignaciones_visibilidad' => 0,
+                'perfiles_mas_visibles' => [],
+                'usuarios_sin_visibilidad' => 0,
+                'promedio_perfiles_por_usuario' => 0
+            ]
         ], 500);
     }
 }
@@ -1104,6 +1277,138 @@ public function removerOficina(Request $request, $id)
             ], 500);
         }
     }
+    /**
+ * Obtener perfiles que el usuario autenticado puede visualizar
+ */
+public function getPerfilesPermitidos(Request $request)
+{
+    try {
+        $user = $request->user();
+        
+        if (!$user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no autenticado',
+                'data' => []
+            ], 401);
+        }
+
+        $perfilesPermitidos = $this->getPerfilesVisiblesPorUsuario($user->usu_id);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Perfiles permitidos obtenidos correctamente',
+            'data' => $perfilesPermitidos
+        ]);
+    } catch (\Exception $e) {
+        Log::error("❌ Error obteniendo perfiles permitidos: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al obtener perfiles permitidos',
+            'data' => []
+        ], 500);
+    }
+}
+
+/**
+ * Método privado para obtener perfiles visibles por usuario
+ */
+private function getPerfilesVisiblesPorUsuario($usuarioId)
+{
+    return DB::table('tbl_per')
+        ->join('tbl_perm_perfil_visibilidad', 'tbl_per.per_id', '=', 'tbl_perm_perfil_visibilidad.per_id_visible')
+        ->where('tbl_perm_perfil_visibilidad.usu_id', $usuarioId)
+        ->where('tbl_perm_perfil_visibilidad.perm_per_vis_activo', true)
+        ->where('tbl_per.per_activo', true)
+        ->select('tbl_per.per_id', 'tbl_per.per_nom')
+        ->orderBy('tbl_per.per_nom')
+        ->get();
+}
+
+/**
+ * Asignar permisos de visibilidad de perfiles a un usuario
+ */
+public function asignarPerfilVisibilidad(Request $request, $usuarioId)
+{
+    $validator = Validator::make($request->all(), [
+        'perfiles_ids' => 'required|array',
+        'perfiles_ids.*' => 'integer|exists:tbl_per,per_id'
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Datos de validación incorrectos',
+            'errors' => $validator->errors()
+        ], 422);
+    }
+
+    try {
+        $usuario = Usuario::find($usuarioId);
+        if (!$usuario) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no encontrado'
+            ], 404);
+        }
+
+        DB::beginTransaction();
+
+        $currentUser = Auth::user();
+        
+        // Desactivar permisos existentes
+        DB::table('tbl_perm_perfil_visibilidad')
+            ->where('usu_id', $usuarioId)
+            ->update(['perm_per_vis_activo' => false]);
+
+        // Crear/reactivar nuevos permisos
+        $asignados = 0;
+        foreach ($request->perfiles_ids as $perfilId) {
+            $existe = DB::table('tbl_perm_perfil_visibilidad')
+                ->where('usu_id', $usuarioId)
+                ->where('per_id_visible', $perfilId)
+                ->first();
+
+            if ($existe) {
+                // Reactivar existente
+                DB::table('tbl_perm_perfil_visibilidad')
+                    ->where('usu_id', $usuarioId)
+                    ->where('per_id_visible', $perfilId)
+                    ->update([
+                        'perm_per_vis_activo' => true,
+                        'perm_per_vis_edi' => now()
+                    ]);
+            } else {
+                // Crear nuevo
+                DB::table('tbl_perm_perfil_visibilidad')->insert([
+                    'usu_id' => $usuarioId,
+                    'per_id_visible' => $perfilId,
+                    'perm_per_vis_activo' => true,
+                    'perm_per_vis_creado_por' => $currentUser ? $currentUser->usu_id : null,
+                    'perm_per_vis_cre' => now(),
+                    'perm_per_vis_edi' => now()
+                ]);
+            }
+            $asignados++;
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Se asignaron {$asignados} permisos de visibilidad de perfiles",
+            'data' => ['permisos_asignados' => $asignados]
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error("❌ Error asignando visibilidad de perfiles: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al asignar permisos de visibilidad'
+        ], 500);
+    }
+}
 
  
 
@@ -1840,4 +2145,5 @@ public function cleanupBrokenPermissions()
             ], 500);
         }
     }
+    
 }

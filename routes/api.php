@@ -5,7 +5,7 @@ use App\Http\Controllers\Api\IconController;
 use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\SubmenuController;
 use App\Http\Controllers\Api\OptionController;
-use App\Http\Controllers\Api\UsuarioController;
+use App\Http\Controllers\Api\UsuarioController; 
 use App\Http\Controllers\Api\PermissionsController;
 use App\Http\Controllers\Api\PerfilController;
 use App\Http\Controllers\Api\DirectModulesController;
@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\TipoOficinaController;
 use App\Http\Controllers\Api\InstitucionController;
 use App\Http\Controllers\Api\ProvinciaController;
 use App\Http\Controllers\Api\CantonController;
+use App\Http\Controllers\Api\LogoController;
 use App\Http\Controllers\Api\ParroquiaController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -30,6 +31,18 @@ use Illuminate\Support\Facades\Log;
 
 // Rutas públicas
 Route::post('/login', [AuthController::class, 'login']);
+
+// ✅ NUEVAS RUTAS PÚBLICAS PARA LOGOS
+Route::prefix('logos')->group(function () {
+    // Obtener logos organizados por ubicación (PÚBLICO)
+    Route::get('/by-ubicacion', [LogoController::class, 'getAllByUbicacion']);
+    
+    // Obtener logo por ubicación específica (PÚBLICO)
+    Route::get('/ubicacion/{ubicacion}', [LogoController::class, 'getByUbicacion']);
+    
+    // Obtener configuración básica de logos (PÚBLICO)
+    Route::get('/config', [LogoController::class, 'getConfig']);
+});
 
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
@@ -292,6 +305,26 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
     Route::get('/usuario/me/institucion', [UsuarioController::class, 'meInstitucion']);
     Route::get('/usuario/me/oficina', [UsuarioController::class, 'meOficina']);
 
+     // === GESTIÓN DE LOGOS ===
+     Route::prefix('logos')->group(function () {
+        // Listar todos los logos (admin)
+        Route::get('/', [LogoController::class, 'index']);
+        
+        // Subir nuevo logo (admin)
+        Route::post('/upload', [LogoController::class, 'store']);
+        
+        // Mostrar logo específico (admin)
+        Route::get('/{id}', [LogoController::class, 'show']);
+        
+        // Actualizar logo existente (admin)
+        Route::put('/{id}', [LogoController::class, 'update']);
+        
+        // Eliminar logo (admin)
+        Route::delete('/{id}', [LogoController::class, 'destroy']);
+        
+        // Establecer logo como principal (admin)
+        Route::post('/{id}/set-principal', [LogoController::class, 'setPrincipal']);
+    });
     // === GESTIÓN DE PERFILES/ROLES ===
     Route::apiResource('perfiles', PerfilController::class);
     Route::get('/perfiles/{id}/usuarios', [PerfilController::class, 'getUsuarios']);

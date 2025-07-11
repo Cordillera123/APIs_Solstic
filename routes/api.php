@@ -1,5 +1,4 @@
 <?php
-
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\IconController;
 use App\Http\Controllers\Api\MenuController;

@@ -1,4 +1,5 @@
 <?php
+
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\IconController;
 use App\Http\Controllers\Api\MenuController;
@@ -26,26 +27,54 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
+// =====================================================
+// 🔐 NUEVAS RUTAS DE SISTEMA DE HORARIOS INTEGRADAS
+// =====================================================
+use App\Http\Controllers\Api\HorarioOficinaController;
+use App\Http\Controllers\Api\LogAccesoController;
+use App\Http\Middleware\VerificarHorarioOficina;
 
+// =====================================================
+// 🌐 RUTAS PÚBLICAS (SIN AUTENTICACIÓN)
+// =====================================================
 
-// Rutas públicas
+// Rutas públicas originales
 Route::post('/login', [AuthController::class, 'login']);
 
-// ✅ NUEVAS RUTAS PÚBLICAS PARA LOGOS
+// ✅ RUTAS PÚBLICAS PARA LOGOS (YA EXISTÍAN)
 Route::prefix('logos')->group(function () {
-    // Obtener logos organizados por ubicación (PÚBLICO)
     Route::get('/by-ubicacion', [LogoController::class, 'getAllByUbicacion']);
-    
-    // Obtener logo por ubicación específica (PÚBLICO)
     Route::get('/ubicacion/{ubicacion}', [LogoController::class, 'getByUbicacion']);
-    
-    // Obtener configuración básica de logos (PÚBLICO)
     Route::get('/config', [LogoController::class, 'getConfig']);
 });
 
-// Rutas protegidas
+// ✅ NUEVAS RUTAS PÚBLICAS DE HORARIOS AGREGADAS
+Route::prefix('horarios')->group(function () {
+    Route::get('/plantillas', [HorarioOficinaController::class, 'plantillasHorarios']);
+});
+
+Route::prefix('oficinas')->group(function () {
+    Route::get('/{oficinaId}/horario-publico', [HorarioOficinaController::class, 'validacionPublica']);
+    Route::get('/{oficinaId}/validar-horario', [HorarioOficinaController::class, 'validarHorario']);
+});
+
+// =====================================================
+// 🔒 RUTAS PROTEGIDAS (CON AUTENTICACIÓN)
+// =====================================================
 Route::middleware('auth:sanctum')->group(function () {
 
+    // =====================================================
+    // 🔐 RUTAS DE AUTENTICACIÓN ORIGINALES
+    // =====================================================
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/user', [AuthController::class, 'user']);
+    
+    // ✅ NUEVAS RUTAS DE AUTENTICACIÓN DE HORARIOS
+    Route::get('/auth/verificar-horario', [AuthController::class, 'verificarHorarioActivo']);
+
+    // =====================================================
+    // ⚙️ CONFIGURACIONES
+    // =====================================================
     Route::prefix('configs')->group(function () {
         Route::get('/', [ConfigController::class, 'getByNameFilter']);
         Route::post('/', [ConfigController::class, 'store']);
@@ -54,76 +83,92 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}', [ConfigController::class, 'destroy']);
         Route::patch('/update-by-name', [ConfigController::class, 'updateByName']);
     });
-    // === RUTAS DE AUTENTICACIÓN ===
-    Route::post('/logout', [AuthController::class, 'logout']);
-    Route::get('/user', [AuthController::class, 'user']);
 
-    // === RUTAS DE ICONOS ===
+    // =====================================================
+    // 🎨 ICONOS
+    // =====================================================
     Route::get('/icons', [IconController::class, 'index']);
     Route::get('/icons/category/{category}', [IconController::class, 'getByCategory']);
 
-    // === RUTAS DE MENÚ DEL USUARIO ===
+    // =====================================================
+    // 🏠 MENÚ DEL USUARIO
+    // =====================================================
     Route::get('/user-menu', [MenuController::class, 'getUserMenu']);
 
-    // === RUTAS DE CONFIGURACIÓN DE VENTANAS ===
+    // =====================================================
+    // 🎛️ CONFIGURACIÓN DE VENTANAS
+    // =====================================================
     Route::put('/menu/{menuId}/direct-window', [MenuController::class, 'toggleMenuDirectWindow']);
     Route::put('/submenu/{submenuId}/direct-window', [MenuController::class, 'toggleSubmenuDirectWindow']);
     Route::put('/option/{optionId}/component', [MenuController::class, 'updateOptionComponent']);
     Route::get('/menu/{menuId}/config', [MenuController::class, 'getMenuConfig']);
     Route::get('/submenu/{submenuId}/config', [MenuController::class, 'getSubmenuConfig']);
 
-    // === CRUD DE MENÚS ===
+    // =====================================================
+    // 📋 CRUD DE MENÚS
+    // =====================================================
     Route::apiResource('menus', MenuController::class);
     Route::put('/menus/{id}/toggle-status', [MenuController::class, 'toggleStatus']);
 
-    // === CRUD DE SUBMENÚS ===
+    // =====================================================
+    // 📋 CRUD DE SUBMENÚS
+    // =====================================================
     Route::apiResource('submenus', SubmenuController::class);
     Route::put('/submenus/{id}/toggle-status', [SubmenuController::class, 'toggleStatus']);
     Route::get('/menus/{menuId}/submenus', [SubmenuController::class, 'getByMenu']);
 
-    // === CRUD DE OPCIONES ===
+    // =====================================================
+    // 📋 CRUD DE OPCIONES
+    // =====================================================
     Route::apiResource('options', OptionController::class);
     Route::put('/options/{id}/toggle-status', [OptionController::class, 'toggleStatus']);
     Route::get('/submenus/{submenuId}/options', [OptionController::class, 'getBySubmenu']);
 
-    // === CRUD DE BOTONES ===
+    // =====================================================
+    // 🔘 CRUD DE BOTONES
+    // =====================================================
     Route::apiResource('buttons', ButtonController::class);
     Route::put('/buttons/{id}/toggle-status', [ButtonController::class, 'toggleStatus']);
     Route::get('/buttons/with-usage', [ButtonController::class, 'getAllWithUsage']);
     Route::get('/options/{optionId}/buttons', [ButtonController::class, 'getByOption']);
     Route::post('/options/{optionId}/assign-buttons', [ButtonController::class, 'assignToOption']);
 
-    // === GESTIÓN DE MODULOS DIRECTOS ===
+    // =====================================================
+    // 🎯 GESTIÓN DE MÓDULOS DIRECTOS
+    // =====================================================
     Route::get('/direct-modules/perfiles', [DirectModulesController::class, 'getPerfilesWithDirectModules']);
     Route::get('/direct-modules/perfiles/{perfilId}', [DirectModulesController::class, 'getModulosDirectosForPerfil']);
     Route::post('/direct-modules/perfiles/{perfilId}/toggle', [DirectModulesController::class, 'toggleModuloDirectoAccess']);
     Route::post('/direct-modules/perfiles/{perfilId}/asignacion-masiva', [DirectModulesController::class, 'asignacionMasiva']);
     Route::post('/direct-modules/copiar-configuracion', [DirectModulesController::class, 'copiarConfiguracion']);
+
+    // =====================================================
+    // 🏢 GESTIÓN DE ENTIDADES GEOGRÁFICAS E INSTITUCIONALES
+    // =====================================================
     Route::prefix('instituciones')->group(function () {
         Route::get('/', [InstitucionController::class, 'index']);
         Route::get('/listar', [InstitucionController::class, 'listar']);
     });
 
-    // ===== GESTIÓN DE PROVINCIAS =====
     Route::prefix('provincias')->group(function () {
         Route::get('/', [ProvinciaController::class, 'index']);
         Route::get('/listar', [ProvinciaController::class, 'listar']);
     });
 
-    // ===== GESTIÓN DE CANTONES =====
     Route::prefix('cantones')->group(function () {
         Route::get('/', [CantonController::class, 'index']);
-        Route::get('/listar', [CantonController::class, 'listar']); // TODOS los cantones
+        Route::get('/listar', [CantonController::class, 'listar']);
         Route::get('/provincia/{provinciaId}', [CantonController::class, 'getByProvincia']);
     });
 
-    // ===== GESTIÓN DE PARROQUIAS =====
     Route::prefix('parroquias')->group(function () {
         Route::get('/', [ParroquiaController::class, 'index']);
         Route::get('/canton/{cantonId}', [ParroquiaController::class, 'getByCanton']);
     });
 
-    // === NUEVAS RUTAS PARA PERMISOS DE MENÚS DIRECTOS ===
+    // =====================================================
+    // 🔧 PERMISOS DE MENÚS DIRECTOS
+    // =====================================================
     Route::get('/my-menu-button-permissions/{menuId}', [MenuButtonPermissionsController::class, 'getMyMenuButtonPermissions']);
     Route::post('/check-menu-button-permission', [MenuButtonPermissionsController::class, 'checkMenuButtonPermission']);
     Route::get('/my-permissions', [MenuButtonPermissionsController::class, 'getMyPermissions']);
@@ -137,9 +182,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/submenu-button-permissions/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
         ->name('submenu.as.menu.permissions');
 
-
-
-    // === RUTAS DE PERMISOS DE BOTONES (ADMINISTRACIÓN) ===
+    // =====================================================
+    // 🔐 PERMISOS DE BOTONES (ADMINISTRACIÓN)
+    // =====================================================
     Route::get('/button-permissions/profiles/{perfilId}/direct-windows', function ($perfilId) {
         try {
             Log::info("🔍 Consultando ventanas directas para perfil: {$perfilId}");
@@ -275,7 +320,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/button-permissions/validate', [ButtonPermissionController::class, 'validateUserButtonPermission']);
     Route::get('/button-permissions/summary', [ButtonPermissionController::class, 'getButtonPermissionsSummary']);
 
-    // === GESTIÓN DE USUARIOS ===
+    // =====================================================
+    // 👤 GESTIÓN DE USUARIOS (COMBINANDO AMBOS SISTEMAS)
+    // =====================================================
     Route::apiResource('usuarios', UsuarioController::class);
     Route::put('/usuarios/{id}/toggle-status', [UsuarioController::class, 'toggleStatus']);
     Route::patch('/usuarios/{id}/reactivate', [UsuarioController::class, 'reactivate']);
@@ -289,42 +336,44 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/usuarios/{id}/copy-permissions', [UsuarioController::class, 'copyUserPermissions']);
 
     Route::get('/usuarios/perfiles-permitidos', [UsuarioController::class, 'getPerfilesPermitidos']);
-Route::get('/usuarios/perfiles-para-filtro', [UsuarioController::class, 'getPerfilesParaFiltro']);
-Route::post('/usuarios/{id}/asignar-perfil-visibilidad', [UsuarioController::class, 'asignarPerfilVisibilidad']);
-// ✅ AGREGAR ESTAS RUTAS EN LA SECCIÓN DE GESTIÓN DE USUARIOS:
-Route::get('/usuarios/{id}/perfiles-visibles', [UsuarioController::class, 'getPerfilesVisiblesUsuario']);
-Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'getEstadisticasVisibilidad']);    
-// ✅ NUEVAS RUTAS PARA OFICINAS EN USUARIOS
+    Route::get('/usuarios/perfiles-para-filtro', [UsuarioController::class, 'getPerfilesParaFiltro']);
+    Route::post('/usuarios/{id}/asignar-perfil-visibilidad', [UsuarioController::class, 'asignarPerfilVisibilidad']);
+    Route::get('/usuarios/{id}/perfiles-visibles', [UsuarioController::class, 'getPerfilesVisiblesUsuario']);
+    Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'getEstadisticasVisibilidad']);    
     Route::post('/usuarios/{id}/asignar-oficina', [UsuarioController::class, 'asignarOficina']);
     Route::delete('/usuarios/{id}/remover-oficina', [UsuarioController::class, 'removerOficina']);
 
-
+    // ✅ RUTAS ORIGINALES DE USUARIO MANTENIDAS
     Route::get('/usuario/me', [UsuarioController::class, 'me']);
     Route::get('/usuario/me/basica', [UsuarioController::class, 'meBasica']);
     Route::get('/usuario/me/institucion', [UsuarioController::class, 'meInstitucion']);
     Route::get('/usuario/me/oficina', [UsuarioController::class, 'meOficina']);
 
-     // === GESTIÓN DE LOGOS ===
-     Route::prefix('logos')->group(function () {
-        // Listar todos los logos (admin)
+    // ✅ NUEVAS RUTAS DE SISTEMA DE HORARIOS PARA USUARIOS
+    Route::get('/usuarios/me', [UsuarioController::class, 'me']);
+    Route::get('/usuarios/me/basica', [UsuarioController::class, 'meBasica']);
+    Route::get('/usuarios/me/institucion', [UsuarioController::class, 'meInstitucion']);
+    Route::get('/usuarios/me/oficina', [UsuarioController::class, 'meOficina']);
+    Route::get('/usuarios/form-options', [UsuarioController::class, 'getFormOptions']);
+    Route::get('/usuarios/stats', [UsuarioController::class, 'getStats']);
+    Route::post('/usuarios/search', [UsuarioController::class, 'search']);
+    Route::get('/usuarios/{id}/logs-acceso', [LogAccesoController::class, 'logsPorUsuario']);
+
+    // =====================================================
+    // 🎨 GESTIÓN DE LOGOS
+    // =====================================================
+    Route::prefix('logos')->group(function () {
         Route::get('/', [LogoController::class, 'index']);
-        
-        // Subir nuevo logo (admin)
         Route::post('/upload', [LogoController::class, 'store']);
-        
-        // Mostrar logo específico (admin)
         Route::get('/{id}', [LogoController::class, 'show']);
-        
-        // Actualizar logo existente (admin)
         Route::put('/{id}', [LogoController::class, 'update']);
-        
-        // Eliminar logo (admin)
         Route::delete('/{id}', [LogoController::class, 'destroy']);
-        
-        // Establecer logo como principal (admin)
         Route::post('/{id}/set-principal', [LogoController::class, 'setPrincipal']);
     });
-    // === GESTIÓN DE PERFILES/ROLES ===
+
+    // =====================================================
+    // 👤 GESTIÓN DE PERFILES/ROLES
+    // =====================================================
     Route::apiResource('perfiles', PerfilController::class);
     Route::get('/perfiles/{id}/usuarios', [PerfilController::class, 'getUsuarios']);
     Route::put('/perfiles/{id}/toggle-status', [PerfilController::class, 'toggleStatus']);
@@ -336,10 +385,14 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
     Route::get('/perfiles/{perfil_id}/diagnosticar-modulos-directos', [PermissionsController::class, 'diagnosticarPerfilSinModulosDirectos']);
     Route::post('/perfiles/{perfil_id}/asignar-permisos-basicos', [PermissionsController::class, 'asignarPermisosBasicosVentanasDirectas']);
 
-    // === GESTIÓN DE ESTADOS ===
+    // =====================================================
+    // 📊 GESTIÓN DE ESTADOS
+    // =====================================================
     Route::apiResource('estados', EstadoController::class);
 
-    // === GESTIÓN DE TIPOS DE OFICINA ===
+    // =====================================================
+    // 🏢 GESTIÓN DE TIPOS DE OFICINA
+    // =====================================================
     Route::prefix('tipos-oficina')->group(function () {
         Route::get('/', [TipoOficinaController::class, 'index']);
         Route::post('/', [TipoOficinaController::class, 'store']);
@@ -349,30 +402,60 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
         Route::delete('/{id}', [TipoOficinaController::class, 'destroy']);
     });
 
-    // ✅ === GESTIÓN DE OFICINAS - RUTAS INDEPENDIENTES ===
+    // =====================================================
+    // 🏢 GESTIÓN DE OFICINAS (COMBINANDO AMBOS SISTEMAS)
+    // =====================================================
     Route::prefix('oficinas')->group(function () {
         // CRUD básico de oficinas
-        Route::get('/', [OficinaController::class, 'index']);           // GET /api/oficinas
-        Route::post('/', [OficinaController::class, 'store']);          // POST /api/oficinas
-        Route::get('/listar/simple', [OficinaController::class, 'listar']); // GET /api/oficinas/listar/simple
-        Route::get('/{id}', [OficinaController::class, 'show']);        // GET /api/oficinas/{id}
-        Route::put('/{id}', [OficinaController::class, 'update']);      // PUT /api/oficinas/{id}
-        Route::delete('/{id}', [OficinaController::class, 'destroy']);  // DELETE /api/oficinas/{id}
-        Route::get('/{id}/usuarios', [OficinaController::class, 'usuarios']); // GET /api/oficinas/{id}/usuarios
+        Route::get('/', [OficinaController::class, 'index']);
+        Route::post('/', [OficinaController::class, 'store']);
+        Route::get('/listar/simple', [OficinaController::class, 'listar']);
+        Route::get('/{id}', [OficinaController::class, 'show']);
+        Route::put('/{id}', [OficinaController::class, 'update']);
+        Route::delete('/{id}', [OficinaController::class, 'destroy']);
+        Route::get('/{id}/usuarios', [OficinaController::class, 'usuarios']);
+
+        // ✅ NUEVAS RUTAS DE SISTEMA DE HORARIOS AGREGADAS
+        Route::get('/stats', [OficinaController::class, 'stats']);
+        Route::get('/activas', [OficinaController::class, 'activas']);
+        Route::post('/search', [OficinaController::class, 'search']);
+        Route::get('/by-institucion/{institucionId}', [OficinaController::class, 'byInstitucion']);
+        Route::get('/by-tipo/{tipoId}', [OficinaController::class, 'byTipo']);
+        Route::get('/by-parroquia/{parroquiaId}', [OficinaController::class, 'byParroquia']);
+
+        // ✅ HORARIOS DE OFICINA (NUEVAS RUTAS)
+        Route::prefix('{id}/horarios')->group(function () {
+            Route::get('/', [HorarioOficinaController::class, 'index']);
+            Route::post('/', [HorarioOficinaController::class, 'store']);
+            Route::delete('/', [HorarioOficinaController::class, 'destroyAll']);
+            Route::post('/batch', [HorarioOficinaController::class, 'storeBatch']);
+            Route::post('/aplicar-plantilla', [HorarioOficinaController::class, 'aplicarPlantilla']);
+            Route::get('/calendario', [HorarioOficinaController::class, 'calendario']);
+            Route::get('/horario-actual', [HorarioOficinaController::class, 'horarioActual']);
+            Route::get('/proximos-horarios', [HorarioOficinaController::class, 'proximosHorarios']);
+            Route::get('/verificar-conflictos', [HorarioOficinaController::class, 'verificarConflictos']);
+            Route::get('/reporte-horarios', [HorarioOficinaController::class, 'reporteHorarios']);
+            Route::get('/resumen-horarios', [HorarioOficinaController::class, 'resumenHorarios']);
+            Route::post('/clonar', [HorarioOficinaController::class, 'clonarHorarios']);
+            
+            Route::prefix('{diaId}')->group(function () {
+                Route::delete('/', [HorarioOficinaController::class, 'destroy']);
+                Route::put('/toggle', [HorarioOficinaController::class, 'toggleHorario']);
+            });
+            
+            Route::post('/copiar/{oficinaDestinoId}', [HorarioOficinaController::class, 'copiarHorarios']);
+        });
+
+        // ✅ LOGS DE ACCESO DE OFICINA (NUEVAS RUTAS)
+        Route::get('/{id}/logs-acceso', [LogAccesoController::class, 'logsPorOficina']);
     });
-    Route::get('/oficinas/stats', [OficinaController::class, 'stats']);
-    Route::get('/oficinas/activas', [OficinaController::class, 'activas']);
-    Route::get('/oficinas/listar', [OficinaController::class, 'listar']);
-    Route::get('/oficinas/by-institucion/{institucionId}', [OficinaController::class, 'byInstitucion']);
-    Route::get('/oficinas/by-tipo/{tipoId}', [OficinaController::class, 'byTipo']);
-    Route::get('/oficinas/by-parroquia/{parroquiaId}', [OficinaController::class, 'byParroquia']);
-    Route::post('/oficinas/search', [OficinaController::class, 'search']);
-    Route::get('/oficinas/{id}/usuarios', [OficinaController::class, 'usuarios']);
 
     // Ruta resource (debe ir después de las rutas específicas)
     Route::resource('oficinas', OficinaController::class);
 
-    // === GESTIÓN DE PERMISOS DE BOTONES POR USUARIO ===
+    // =====================================================
+    // 👥 PERMISOS DE BOTONES POR USUARIO
+    // =====================================================
     Route::get('/user-button-permissions/profiles/{perfilId}/users', [UserButtonPermissionController::class, 'getUsersByProfile']);
     Route::get('/user-button-permissions/users/{usuarioId}', [UserButtonPermissionController::class, 'getUserButtonPermissions']);
     Route::post('/user-button-permissions/toggle', [UserButtonPermissionController::class, 'toggleUserButtonPermission']);
@@ -383,7 +466,9 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
     Route::post('/user-button-permissions/users/{usuarioId}/check-permission', [UserButtonPermissionController::class, 'checkUserButtonPermission']);
     Route::post('/user-button-permissions/users/{usuarioId}/check-menu-permission', [UserButtonPermissionController::class, 'checkUserMenuButtonPermission']);
 
-    // === GESTIÓN DE PERMISOS ===
+    // =====================================================
+    // 🔐 GESTIÓN DE PERMISOS GENERALES
+    // =====================================================
     Route::get('/permissions/profiles', [PermissionsController::class, 'getProfiles']);
     Route::get('/permissions/summary', [PermissionsController::class, 'getPermissionsSummary']);
     Route::get('/permissions/menu-structure/{perfilId}', [PermissionsController::class, 'getMenuStructureWithPermissions']);
@@ -398,12 +483,30 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
     Route::post('/permissions/sync-button-permissions', [PermissionsController::class, 'syncButtonPermissionsFromOptions']);
     Route::post('/permissions/configuracion-masiva-botones', [PermissionsController::class, 'configuracionMasivaBotones']);
 
-    // === RUTAS DE UTILIDADES ===
+    // =====================================================
+    // ✅ NUEVAS RUTAS DE ESTADÍSTICAS DE HORARIOS
+    // =====================================================
+    Route::prefix('horarios')->group(function () {
+        Route::get('/estadisticas', [HorarioOficinaController::class, 'estadisticasGenerales']);
+    });
+
+    // =====================================================
+    // ✅ NUEVAS RUTAS DE LOGS DE ACCESO
+    // =====================================================
+    Route::prefix('logs')->group(function () {
+        Route::post('/acceso-fallido', [LogAccesoController::class, 'registrarIntentoFallido']);
+        Route::get('/estadisticas-generales', [LogAccesoController::class, 'estadisticasGenerales']);
+        Route::delete('/limpiar', [LogAccesoController::class, 'limpiarLogsAntiguos']);
+        Route::get('/exportar', [LogAccesoController::class, 'exportarLogs']);
+    });
+
+    // =====================================================
+    // 📝 RUTAS DE UTILIDADES Y OPCIONES PARA FORMULARIOS
+    // =====================================================
     Route::get('/form-options', function () {
         return response()->json([
             'perfiles' => DB::table('tbl_per')->select('per_id as value', 'per_nom as label')->where('per_activo', true)->get(),
             'estados' => DB::table('tbl_est')->select('est_id as value', 'est_nom as label')->where('est_activo', true)->get(),
-            // ✅ CORREGIDO: Usar tabla correcta y campo correcto
             'oficinas' => DB::table('gaf_oficin')->select('oficin_codigo as value', 'oficin_nombre as label')->where('oficin_ctractual', 1)->get(),
             'menus' => DB::table('tbl_men')->where('men_activo', true)->select('men_id as value', 'men_nom as label')->get(),
             'submenus' => DB::table('tbl_sub')->where('sub_activo', true)->select('sub_id as value', 'sub_nom as label')->get(),
@@ -417,7 +520,9 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
         ]);
     });
 
-    // === RUTAS DE VALIDACIÓN DE PERMISOS ===
+    // =====================================================
+    // 🔐 VALIDACIONES DE PERMISOS
+    // =====================================================
     Route::post('/check-permission', function (\Illuminate\Http\Request $request) {
         $permission = $request->input('permission');
         $hasPermission = true; // Temporal para testing
@@ -479,7 +584,9 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
         ]);
     });
 
-    // === RUTAS DE DASHBOARD/ESTADÍSTICAS ===
+    // =====================================================
+    // 📊 DASHBOARD/ESTADÍSTICAS
+    // =====================================================
     Route::get('/dashboard/stats', function () {
         $stats = [
             'total_usuarios' => DB::table('tbl_usu')->count(),
@@ -493,7 +600,6 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
             'total_asignaciones_botones' => DB::table('tbl_opc_bot')->where('opc_bot_activo', true)->count(),
             'total_permisos_botones_perfil' => DB::table('tbl_perm_bot_perfil')->where('perm_bot_per_activo', true)->count(),
             'total_permisos_botones_usuario' => DB::table('tbl_perm_bot_usuario')->where('perm_bot_usu_activo', true)->count(),
-            // ✅ NUEVAS ESTADÍSTICAS DE OFICINAS
             'total_oficinas' => DB::table('gaf_oficin')->count(),
             'oficinas_activas' => DB::table('gaf_oficin')->where('oficin_ctractual', 1)->count()
         ];
@@ -504,3 +610,121 @@ Route::get('/usuarios/estadisticas-visibilidad', [UsuarioController::class, 'get
         ]);
     });
 });
+
+// =====================================================
+// ✅ NUEVAS RUTAS ESPECIALES PARA SUPER ADMINS (per_id = 3)
+// =====================================================
+Route::middleware(['auth:sanctum'])->group(function () {
+    
+    // Estas rutas están disponibles para Super Admins sin restricción de horario
+    Route::prefix('admin')->group(function () {
+        
+        // Gestión de horarios sin restricciones
+        Route::prefix('horarios')->group(function () {
+            Route::get('/estadisticas-completas', [HorarioOficinaController::class, 'estadisticasGenerales']);
+            Route::post('/limpiar-logs-masivo', [LogAccesoController::class, 'limpiarLogsAntiguos']);
+        });
+        
+        // Gestión de usuarios sin restricciones
+        Route::prefix('usuarios')->group(function () {
+            Route::post('/cleanup-permissions', [UsuarioController::class, 'cleanupBrokenPermissions']);
+            Route::get('/debug-permissions/{userId}', [AuthController::class, 'debugUserPermissions']);
+        });
+    });
+});
+
+// =====================================================
+// ✅ NUEVAS RUTAS DE DESARROLLO Y DEBUG (Solo en desarrollo)
+// =====================================================
+if (app()->environment(['local', 'development'])) {
+    Route::prefix('dev')->middleware(['auth:sanctum'])->group(function () {
+        Route::get('/test-horario/{usuarioId}', function ($usuarioId) {
+            $authController = new AuthController();
+            $usuario = \App\Models\Usuario::find($usuarioId);
+            if (!$usuario) {
+                return response()->json(['error' => 'Usuario no encontrado'], 404);
+            }
+            
+            $validacion = $authController->validarHorarioAcceso($usuario, request());
+            return response()->json([
+                'usuario_id' => $usuarioId,
+                'validacion' => $validacion,
+                'timestamp' => now()
+            ]);
+        });
+        
+        Route::get('/debug-permisos/{userId}', [AuthController::class, 'debugUserPermissions']);
+    });
+}
+
+// =====================================================
+// ✅ NUEVAS RUTAS AUXILIARES PARA SELECTS/DROPDOWNS
+// =====================================================
+Route::middleware('auth:sanctum')->prefix('aux')->group(function () {
+    Route::get('/perfiles', function () {
+        return response()->json([
+            'data' => DB::table('tbl_per')
+                ->where('per_activo', true)
+                ->select('per_id as value', 'per_nom as label')
+                ->orderBy('per_nom')
+                ->get()
+        ]);
+    });
+    
+    Route::get('/estados', function () {
+        return response()->json([
+            'data' => DB::table('tbl_est')
+                ->where('est_activo', true)
+                ->select('est_id as value', 'est_nom as label')
+                ->orderBy('est_nom')
+                ->get()
+        ]);
+    });
+    
+    Route::get('/instituciones', function () {
+        return response()->json([
+            'data' => DB::table('gaf_instit')
+                ->select('instit_codigo as value', 'instit_nombre as label')
+                ->orderBy('instit_nombre')
+                ->get()
+        ]);
+    });
+    
+    Route::get('/tipos-oficina', function () {
+        return response()->json([
+            'data' => DB::table('gaf_tofici')
+                ->select('tofici_codigo as value', 'tofici_descripcion as label')
+                ->orderBy('tofici_descripcion')
+                ->get()
+        ]);
+    });
+    
+    Route::get('/dias-semana', function () {
+        return response()->json([
+            'data' => DB::table('gaf_diasem')
+                ->select('diasem_codigo as value', 'diasem_nombre as label', 'diasem_abreviatura as short_label')
+                ->orderBy('diasem_codigo')
+                ->get()
+        ]);
+    });
+
+    Route::get('/provincias', function () {
+        return response()->json([
+            'data' => DB::table('gaf_provin')
+                ->select('provin_codigo as value', 'provin_nombre as label')
+                ->orderBy('provin_nombre')
+                ->get()
+        ]);
+    });
+
+    Route::get('/cantones', function () {
+        return response()->json([
+            'data' => DB::table('gaf_canton as c')
+                ->leftJoin('gaf_provin as p', 'c.canton_provin_codigo', '=', 'p.provin_codigo')
+                ->select('c.canton_codigo as value', DB::raw("CONCAT(c.canton_nombre, ' (', p.provin_nombre, ')') as label"))
+                ->orderBy('c.canton_nombre')
+                ->get()
+        ]);
+    });
+});
+

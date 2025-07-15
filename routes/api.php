@@ -319,7 +319,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/button-permissions/assign-user', [ButtonPermissionController::class, 'assignUserButtonPermission']);
     Route::post('/button-permissions/validate', [ButtonPermissionController::class, 'validateUserButtonPermission']);
     Route::get('/button-permissions/summary', [ButtonPermissionController::class, 'getButtonPermissionsSummary']);
-
+    
     // =====================================================
     // 👤 GESTIÓN DE USUARIOS (COMBINANDO AMBOS SISTEMAS)
     // =====================================================

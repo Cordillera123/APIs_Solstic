@@ -200,7 +200,7 @@ class AuthController extends Controller
             ];
         }
 
-        $now = Carbon::now();
+        $now = Carbon::now('America/Guayaquil'); // Usar la zona horaria configurada
         $diaSemana = $now->dayOfWeekIso; // 1=Lunes, 7=Domingo
         $horaActual = $now->format('H:i:s');
 
@@ -289,7 +289,7 @@ class AuthController extends Controller
     private function registrarIntentoFallido($usuario, $validacionHorario, $request)
     {
         try {
-            $now = Carbon::now();
+            $now = Carbon::now('America/Guayaquil'); // Usar la zona horaria configurada
             
             $logData = [
                 'logacc_usu_id' => $usuario->usu_id,
@@ -346,7 +346,7 @@ class AuthController extends Controller
             ];
         }
 
-        $now = Carbon::now();
+        $now = Carbon::now('America/Guayaquil'); // Usar la zona horaria configurada
         $diaSemana = $now->dayOfWeekIso;
 
         // Obtener horario actual

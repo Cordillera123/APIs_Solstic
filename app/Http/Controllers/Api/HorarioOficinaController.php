@@ -1082,7 +1082,7 @@ class HorarioOficinaController extends Controller
     public function horarioActual($oficinaId)
     {
         try {
-            $now = Carbon::now();
+            $now = Carbon::now('America/Guayaquil');
             $diaSemana = $now->dayOfWeekIso; // 1=Lunes, 7=Domingo
             
             // Verificar que la oficina existe
@@ -1145,7 +1145,7 @@ class HorarioOficinaController extends Controller
                             $tiempoRestante = $horaActual->diffInMinutes($horaFin);
                         }
                     } else {
-                        // Horario normal
+
                         $tiempoRestante = $horaActual->diffInMinutes($horaFin);
                     }
                 }
@@ -1816,7 +1816,7 @@ class HorarioOficinaController extends Controller
     public function validacionPublica($oficinaId)
     {
         try {
-            $now = Carbon::now();
+            $now = Carbon::now('America/Guayaquil');
             $diaSemana = $now->dayOfWeekIso; // 1=Lunes, 7=Domingo
             
             // Verificar que la oficina existe y está activa

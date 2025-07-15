@@ -28,27 +28,27 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
 // =====================================================
-// 🔐 NUEVAS RUTAS DE SISTEMA DE HORARIOS INTEGRADAS
+// 🔐 SISTEMA DE HORARIOS INTEGRADO - CONTROLLERS
 // =====================================================
 use App\Http\Controllers\Api\HorarioOficinaController;
+use App\Http\Controllers\Api\HorarioUsuarioController;
 use App\Http\Controllers\Api\LogAccesoController;
-use App\Http\Middleware\VerificarHorarioOficina;
 
 // =====================================================
 // 🌐 RUTAS PÚBLICAS (SIN AUTENTICACIÓN)
 // =====================================================
 
-// Rutas públicas originales
+// Autenticación
 Route::post('/login', [AuthController::class, 'login']);
 
-// ✅ RUTAS PÚBLICAS PARA LOGOS (YA EXISTÍAN)
+// ✅ LOGOS PÚBLICOS
 Route::prefix('logos')->group(function () {
     Route::get('/by-ubicacion', [LogoController::class, 'getAllByUbicacion']);
     Route::get('/ubicacion/{ubicacion}', [LogoController::class, 'getByUbicacion']);
     Route::get('/config', [LogoController::class, 'getConfig']);
 });
 
-// ✅ NUEVAS RUTAS PÚBLICAS DE HORARIOS AGREGADAS
+// ✅ HORARIOS PÚBLICOS
 Route::prefix('horarios')->group(function () {
     Route::get('/plantillas', [HorarioOficinaController::class, 'plantillasHorarios']);
 });
@@ -59,21 +59,24 @@ Route::prefix('oficinas')->group(function () {
 });
 
 // =====================================================
-// 🔒 RUTAS PROTEGIDAS (CON AUTENTICACIÓN)
+// 🔒 RUTAS PROTEGIDAS CON HORARIOS INDIVIDUALES
 // =====================================================
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'horario-individual'])->group(function () {
 
     // =====================================================
-    // 🔐 RUTAS DE AUTENTICACIÓN ORIGINALES
+    // 🔐 AUTENTICACIÓN Y SESIÓN
     // =====================================================
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);
     
-    // ✅ NUEVAS RUTAS DE AUTENTICACIÓN DE HORARIOS
-    Route::get('/auth/verificar-horario', [AuthController::class, 'verificarHorarioActivo']);
+    // ✅ RUTA ESPECÍFICA PARA VERIFICAR HORARIO (SIN MIDDLEWARE)
+    Route::withoutMiddleware(['horario-individual'])->group(function () {
+        Route::get('/auth/verificar-horario', [AuthController::class, 'verificarHorarioActivo']);
+        Route::post('/auth/verificar-horario', [AuthController::class, 'verificarHorarioActivo']);
+    });
 
     // =====================================================
-    // ⚙️ CONFIGURACIONES
+    // ⚙️ CONFIGURACIONES DEL SISTEMA
     // =====================================================
     Route::prefix('configs')->group(function () {
         Route::get('/', [ConfigController::class, 'getByNameFilter']);
@@ -143,7 +146,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/direct-modules/copiar-configuracion', [DirectModulesController::class, 'copiarConfiguracion']);
 
     // =====================================================
-    // 🏢 GESTIÓN DE ENTIDADES GEOGRÁFICAS E INSTITUCIONALES
+    // 🏢 ENTIDADES GEOGRÁFICAS E INSTITUCIONALES
     // =====================================================
     Route::prefix('instituciones')->group(function () {
         Route::get('/', [InstitucionController::class, 'index']);
@@ -169,18 +172,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // =====================================================
     // 🔧 PERMISOS DE MENÚS DIRECTOS
     // =====================================================
-    Route::get('/my-menu-button-permissions/{menuId}', [MenuButtonPermissionsController::class, 'getMyMenuButtonPermissions']);
-    Route::post('/check-menu-button-permission', [MenuButtonPermissionsController::class, 'checkMenuButtonPermission']);
-    Route::get('/my-permissions', [MenuButtonPermissionsController::class, 'getMyPermissions']);
-    Route::get('/menu-button-info/{perfilId?}', [MenuButtonPermissionsController::class, 'getMenuButtonInfo']);
-    Route::get('/submenu-button-permissions/{menuId}/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuButtonPermissions'])
-        ->name('submenu.button.permissions');
-    Route::post('/check-submenu-button-permission', [MenuButtonPermissionsController::class, 'checkSubmenuButtonPermission'])
-        ->name('submenu.button.permission.check');
-    Route::get('/menu-button-permissions/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
-        ->name('submenu.as.menu.permissions');
-    Route::get('/submenu-button-permissions/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
-        ->name('submenu.as.menu.permissions');
+    Route::prefix('menu-button-permissions')->group(function () {
+        Route::get('/my-permissions/{menuId}', [MenuButtonPermissionsController::class, 'getMyMenuButtonPermissions']);
+        Route::post('/check-menu-permission', [MenuButtonPermissionsController::class, 'checkMenuButtonPermission']);
+        Route::get('/my-permissions', [MenuButtonPermissionsController::class, 'getMyPermissions']);
+        Route::get('/info/{perfilId?}', [MenuButtonPermissionsController::class, 'getMenuButtonInfo']);
+        Route::get('/submenu/{menuId}/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuButtonPermissions'])
+            ->name('submenu.button.permissions');
+        Route::post('/check-submenu-permission', [MenuButtonPermissionsController::class, 'checkSubmenuButtonPermission'])
+            ->name('submenu.button.permission.check');
+        Route::get('/submenu-as-menu/{submenuId}', [MenuButtonPermissionsController::class, 'getMySubmenuAsMenuPermissions'])
+            ->name('submenu.as.menu.permissions');
+    });
 
     // =====================================================
     // 🔐 PERMISOS DE BOTONES (ADMINISTRACIÓN)
@@ -321,7 +324,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/button-permissions/summary', [ButtonPermissionController::class, 'getButtonPermissionsSummary']);
     
     // =====================================================
-    // 👤 GESTIÓN DE USUARIOS (COMBINANDO AMBOS SISTEMAS)
+    // 👤 GESTIÓN DE USUARIOS
     // =====================================================
     Route::apiResource('usuarios', UsuarioController::class);
     Route::put('/usuarios/{id}/toggle-status', [UsuarioController::class, 'toggleStatus']);
@@ -334,7 +337,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/usuarios/{id}/assign-permissions', [UsuarioController::class, 'assignPermissions']);
     Route::get('/usuarios/{id}/active-permissions', [UsuarioController::class, 'getActivePermissions']);
     Route::post('/usuarios/{id}/copy-permissions', [UsuarioController::class, 'copyUserPermissions']);
-
     Route::get('/usuarios/perfiles-permitidos', [UsuarioController::class, 'getPerfilesPermitidos']);
     Route::get('/usuarios/perfiles-para-filtro', [UsuarioController::class, 'getPerfilesParaFiltro']);
     Route::post('/usuarios/{id}/asignar-perfil-visibilidad', [UsuarioController::class, 'asignarPerfilVisibilidad']);
@@ -343,21 +345,52 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/usuarios/{id}/asignar-oficina', [UsuarioController::class, 'asignarOficina']);
     Route::delete('/usuarios/{id}/remover-oficina', [UsuarioController::class, 'removerOficina']);
 
-    // ✅ RUTAS ORIGINALES DE USUARIO MANTENIDAS
-    Route::get('/usuario/me', [UsuarioController::class, 'me']);
-    Route::get('/usuario/me/basica', [UsuarioController::class, 'meBasica']);
-    Route::get('/usuario/me/institucion', [UsuarioController::class, 'meInstitucion']);
-    Route::get('/usuario/me/oficina', [UsuarioController::class, 'meOficina']);
-
-    // ✅ NUEVAS RUTAS DE SISTEMA DE HORARIOS PARA USUARIOS
-    Route::get('/usuarios/me', [UsuarioController::class, 'me']);
-    Route::get('/usuarios/me/basica', [UsuarioController::class, 'meBasica']);
-    Route::get('/usuarios/me/institucion', [UsuarioController::class, 'meInstitucion']);
-    Route::get('/usuarios/me/oficina', [UsuarioController::class, 'meOficina']);
-    Route::get('/usuarios/form-options', [UsuarioController::class, 'getFormOptions']);
-    Route::get('/usuarios/stats', [UsuarioController::class, 'getStats']);
+    // Información del usuario autenticado (sin restricción de horario)
+    Route::withoutMiddleware(['horario-individual'])->group(function () {
+        Route::get('/usuarios/me', [UsuarioController::class, 'me']);
+        Route::get('/usuarios/me/basica', [UsuarioController::class, 'meBasica']);
+        Route::get('/usuarios/me/institucion', [UsuarioController::class, 'meInstitucion']);
+        Route::get('/usuarios/me/oficina', [UsuarioController::class, 'meOficina']);
+        Route::get('/usuarios/form-options', [UsuarioController::class, 'getFormOptions']);
+        Route::get('/usuarios/stats', [UsuarioController::class, 'getStats']);
+    });
+    
     Route::post('/usuarios/search', [UsuarioController::class, 'search']);
     Route::get('/usuarios/{id}/logs-acceso', [LogAccesoController::class, 'logsPorUsuario']);
+
+    // =====================================================
+    // 🕐 GESTIÓN DE HORARIOS INDIVIDUALES DE USUARIOS
+    // =====================================================
+    
+    // Horarios del usuario autenticado (sin restricción de horario)
+    Route::withoutMiddleware(['horario-individual'])->group(function () {
+        Route::get('/usuarios/me/horarios', [HorarioUsuarioController::class, 'miHorario']);
+        Route::get('/usuarios/me/horario-actual', [HorarioUsuarioController::class, 'miHorarioActual']);
+    });
+
+    // Horarios de usuario específico
+    Route::prefix('usuarios/{usuarioId}/horarios')->group(function () {
+        Route::get('/', [HorarioUsuarioController::class, 'index']);
+        Route::post('/', [HorarioUsuarioController::class, 'store']);
+        Route::delete('/', [HorarioUsuarioController::class, 'destroyAll']);
+        Route::post('/batch', [HorarioUsuarioController::class, 'storeBatch']);
+        Route::post('/clonar-oficina', [HorarioUsuarioController::class, 'clonarDesdeOficina']);
+        Route::get('/validar-acceso', [HorarioUsuarioController::class, 'validarAcceso']);
+        Route::get('/horario-actual', [HorarioUsuarioController::class, 'horarioActual']);
+        Route::get('/efectivo', [HorarioUsuarioController::class, 'horarioEfectivoFecha']);
+        
+        // ✅ HORARIOS TEMPORALES (Vacaciones, permisos, etc.)
+        Route::post('/temporal', [HorarioUsuarioController::class, 'storeHorarioTemporal']);
+        Route::get('/temporales', [HorarioUsuarioController::class, 'getHorariosTemporales']);
+        Route::delete('/temporal/{temporalId}', [HorarioUsuarioController::class, 'eliminarHorarioTemporal']);
+        
+        // Eliminar horarios específicos
+        Route::delete('/{diaId}', [HorarioUsuarioController::class, 'destroy']);
+    });
+
+    // Transferencias y copias entre usuarios
+    Route::post('/usuarios/{usuarioId}/transferir-oficina', [HorarioUsuarioController::class, 'transferirOficina']);
+    Route::post('/usuarios/{usuarioOrigenId}/horarios/copiar/{usuarioDestinoId}', [HorarioUsuarioController::class, 'copiarHorarios']);
 
     // =====================================================
     // 🎨 GESTIÓN DE LOGOS
@@ -403,7 +436,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // =====================================================
-    // 🏢 GESTIÓN DE OFICINAS (COMBINANDO AMBOS SISTEMAS)
+    // 🏢 GESTIÓN DE OFICINAS
     // =====================================================
     Route::prefix('oficinas')->group(function () {
         // CRUD básico de oficinas
@@ -415,7 +448,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}', [OficinaController::class, 'destroy']);
         Route::get('/{id}/usuarios', [OficinaController::class, 'usuarios']);
 
-        // ✅ NUEVAS RUTAS DE SISTEMA DE HORARIOS AGREGADAS
+        // Filtros y estadísticas
         Route::get('/stats', [OficinaController::class, 'stats']);
         Route::get('/activas', [OficinaController::class, 'activas']);
         Route::post('/search', [OficinaController::class, 'search']);
@@ -423,7 +456,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/by-tipo/{tipoId}', [OficinaController::class, 'byTipo']);
         Route::get('/by-parroquia/{parroquiaId}', [OficinaController::class, 'byParroquia']);
 
-        // ✅ HORARIOS DE OFICINA (NUEVAS RUTAS)
+        // ✅ HORARIOS DE OFICINA
         Route::prefix('{id}/horarios')->group(function () {
             Route::get('/', [HorarioOficinaController::class, 'index']);
             Route::post('/', [HorarioOficinaController::class, 'store']);
@@ -446,7 +479,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/copiar/{oficinaDestinoId}', [HorarioOficinaController::class, 'copiarHorarios']);
         });
 
-        // ✅ LOGS DE ACCESO DE OFICINA (NUEVAS RUTAS)
+        // Logs de acceso de oficina
         Route::get('/{id}/logs-acceso', [LogAccesoController::class, 'logsPorOficina']);
     });
 
@@ -474,7 +507,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/permissions/menu-structure/{perfilId}', [PermissionsController::class, 'getMenuStructureWithPermissions']);
     Route::get('/permissions/menu-structure-buttons/{perfilId}', [PermissionsController::class, 'getMenuStructureWithButtonPermissions']);
     Route::post('/permissions/toggle', [PermissionsController::class, 'togglePermission']);
-    Route::post('/permissions/bulk-assign', [PermissionsController::class, 'bulkAssignPermissions']);
+    Route::post('/permissions/bulk-assign', [PermissionsController::class, 'bulkAssignButtonPermissions']);
     Route::post('/permissions/copy', [PermissionsController::class, 'copyPermissions']);
     Route::post('/permissions/validate', [PermissionsController::class, 'validateUserPermission']);
     Route::get('/permissions/user-buttons/{opcId}', [PermissionsController::class, 'getUserButtonPermissionsForOption']);
@@ -484,14 +517,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/permissions/configuracion-masiva-botones', [PermissionsController::class, 'configuracionMasivaBotones']);
 
     // =====================================================
-    // ✅ NUEVAS RUTAS DE ESTADÍSTICAS DE HORARIOS
+    // 📊 ESTADÍSTICAS Y GESTIÓN DE HORARIOS
     // =====================================================
     Route::prefix('horarios')->group(function () {
+        // Estadísticas de oficinas
         Route::get('/estadisticas', [HorarioOficinaController::class, 'estadisticasGenerales']);
+        
+        // ✅ ESTADÍSTICAS DE HORARIOS INDIVIDUALES
+        Route::get('/usuarios/estadisticas', [HorarioUsuarioController::class, 'estadisticasUsuarios']);
+        Route::delete('/temporales/limpiar-vencidos', [HorarioUsuarioController::class, 'limpiarHorariosVencidos']);
     });
 
     // =====================================================
-    // ✅ NUEVAS RUTAS DE LOGS DE ACCESO
+    // 📋 LOGS DE ACCESO
     // =====================================================
     Route::prefix('logs')->group(function () {
         Route::post('/acceso-fallido', [LogAccesoController::class, 'registrarIntentoFallido']);
@@ -501,7 +539,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // =====================================================
-    // 📝 RUTAS DE UTILIDADES Y OPCIONES PARA FORMULARIOS
+    // 📝 UTILIDADES Y OPCIONES PARA FORMULARIOS
     // =====================================================
     Route::get('/form-options', function () {
         return response()->json([
@@ -601,7 +639,32 @@ Route::middleware('auth:sanctum')->group(function () {
             'total_permisos_botones_perfil' => DB::table('tbl_perm_bot_perfil')->where('perm_bot_per_activo', true)->count(),
             'total_permisos_botones_usuario' => DB::table('tbl_perm_bot_usuario')->where('perm_bot_usu_activo', true)->count(),
             'total_oficinas' => DB::table('gaf_oficin')->count(),
-            'oficinas_activas' => DB::table('gaf_oficin')->where('oficin_ctractual', 1)->count()
+            'oficinas_activas' => DB::table('gaf_oficin')->where('oficin_ctractual', 1)->count(),
+            
+            // ✅ NUEVAS ESTADÍSTICAS DE HORARIOS INDIVIDUALES
+            'usuarios_con_horarios_personalizados' => DB::table('tbl_usu')
+                ->whereExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('gaf_jorusu')
+                        ->whereRaw('gaf_jorusu.jorusu_usu_id = tbl_usu.usu_id');
+                })
+                ->where('est_id', 1)
+                ->count(),
+            'usuarios_con_horarios_temporales' => DB::table('tbl_usu')
+                ->whereExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('gaf_jorusu_temp')
+                        ->whereRaw('gaf_jorusu_temp.temp_usu_id = tbl_usu.usu_id')
+                        ->where('temp_activo', true)
+                        ->where('temp_fecha_fin', '>=', now());
+                })
+                ->where('est_id', 1)
+                ->count(),
+            'total_horarios_personalizados' => DB::table('gaf_jorusu')->count(),
+            'total_horarios_temporales_activos' => DB::table('gaf_jorusu_temp')
+                ->where('temp_activo', true)
+                ->where('temp_fecha_fin', '>=', now())
+                ->count()
         ];
 
         return response()->json([
@@ -612,7 +675,7 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 // =====================================================
-// ✅ NUEVAS RUTAS ESPECIALES PARA SUPER ADMINS (per_id = 3)
+// 🔐 RUTAS ESPECIALES PARA SUPER ADMINS (sin restricción de horario)
 // =====================================================
 Route::middleware(['auth:sanctum'])->group(function () {
     
@@ -634,7 +697,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 });
 
 // =====================================================
-// ✅ NUEVAS RUTAS DE DESARROLLO Y DEBUG (Solo en desarrollo)
+// 🛠️ RUTAS DE DESARROLLO Y DEBUG (Solo en desarrollo)
 // =====================================================
 if (app()->environment(['local', 'development'])) {
     Route::prefix('dev')->middleware(['auth:sanctum'])->group(function () {
@@ -654,11 +717,33 @@ if (app()->environment(['local', 'development'])) {
         });
         
         Route::get('/debug-permisos/{userId}', [AuthController::class, 'debugUserPermissions']);
+        
+        // ✅ NUEVAS RUTAS DE DEBUG PARA HORARIOS INDIVIDUALES
+        Route::get('/test-horario-individual/{usuarioId}', function ($usuarioId) {
+            $horarioController = new HorarioUsuarioController();
+            return $horarioController->index($usuarioId, request());
+        });
+        
+        Route::post('/crear-horario-temporal-test/{usuarioId}', function ($usuarioId) {
+            $request = request();
+            $request->merge([
+                'fecha_inicio' => now()->format('Y-m-d'),
+                'fecha_fin' => now()->addDays(2)->format('Y-m-d'),
+                'horarios' => [
+                    ['dia_codigo' => now()->dayOfWeekIso, 'hora_entrada' => '09:00', 'hora_salida' => '17:00']
+                ],
+                'motivo' => 'Test de desarrollo',
+                'tipo_temporal' => 'CAPACITACION'
+            ]);
+            
+            $horarioController = new HorarioUsuarioController();
+            return $horarioController->storeHorarioTemporal($usuarioId, $request);
+        });
     });
 }
 
 // =====================================================
-// ✅ NUEVAS RUTAS AUXILIARES PARA SELECTS/DROPDOWNS
+// 🔗 RUTAS AUXILIARES PARA SELECTS/DROPDOWNS
 // =====================================================
 Route::middleware('auth:sanctum')->prefix('aux')->group(function () {
     Route::get('/perfiles', function () {
@@ -726,5 +811,17 @@ Route::middleware('auth:sanctum')->prefix('aux')->group(function () {
                 ->get()
         ]);
     });
+    
+    // ✅ NUEVAS RUTAS AUXILIARES PARA HORARIOS
+    Route::get('/tipos-temporales', function () {
+        return response()->json([
+            'data' => [
+                ['value' => 'VACACIONES', 'label' => 'Vacaciones'],
+                ['value' => 'PERMISO_MEDICO', 'label' => 'Permiso Médico'],
+                ['value' => 'PROYECTO_ESPECIAL', 'label' => 'Proyecto Especial'],
+                ['value' => 'CAPACITACION', 'label' => 'Capacitación'],
+                ['value' => 'OTRO', 'label' => 'Otro']
+            ]
+        ]);
+    });
 });
-

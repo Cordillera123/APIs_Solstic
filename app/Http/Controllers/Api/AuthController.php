@@ -152,8 +152,15 @@ class AuthController extends Controller
     /**
      * ✅ NUEVO: Validar horario de acceso
      */
-    public function validarHorarioAcceso($usuario, $request)
-    {
+    /**
+ * ✅ MÉTODO ACTUALIZADO: Validar horario con nueva lógica de prioridades
+ */
+/**
+ * ✅ MÉTODO CORREGIDO: Validar horario de acceso con manejo de errores
+ */
+public function validarHorarioAcceso($usuario, $request)
+{
+    try {
         // Excepciones: Super Admins (per_id = 3) no tienen restricciones de horario
         if ($usuario->per_id == 3) {
             Log::info("🔓 Acceso sin restricción de horario - Super Admin: {$usuario->usu_id}");
@@ -182,10 +189,8 @@ class AuthController extends Controller
             ];
         }
 
-        // Verificar que la oficina esté activa
-        $oficina = DB::table('gaf_oficin')
-            ->where('oficin_codigo', $usuario->oficin_codigo)
-            ->first();
+        // Verificar que la oficina esté activa con manejo de errores
+        $oficina = $this->getOficinaInfo($usuario->oficin_codigo);
 
         if (!$oficina || $oficina->oficin_ctractual != 1) {
             Log::warning("🚫 Oficina inactiva: {$usuario->oficin_codigo} para usuario {$usuario->usu_id}");
@@ -200,24 +205,15 @@ class AuthController extends Controller
             ];
         }
 
-        $now = Carbon::now('America/Guayaquil'); // Usar la zona horaria configurada
+        $now = Carbon::now('America/Guayaquil');
         $diaSemana = $now->dayOfWeekIso; // 1=Lunes, 7=Domingo
         $horaActual = $now->format('H:i:s');
 
-        // Obtener horario para el día actual
-        $horario = DB::table('gaf_jorofi')
-            ->leftJoin('gaf_diasem', 'gaf_jorofi.jorofi_diasem_codigo', '=', 'gaf_diasem.diasem_codigo')
-            ->where('gaf_jorofi.jorofi_oficin_codigo', $usuario->oficin_codigo)
-            ->where('gaf_jorofi.jorofi_diasem_codigo', $diaSemana)
-            ->where('gaf_jorofi.jorofi_ctrhabil', 1)
-            ->select(
-                'gaf_jorofi.*',
-                'gaf_diasem.diasem_nombre'
-            )
-            ->first();
+        // ✅ NUEVA LÓGICA DE PRIORIDAD CON TEMPORALES
+        $horarioEfectivo = $this->obtenerHorarioEfectivoParaLogin($usuario, $diaSemana, $now);
 
-        if (!$horario) {
-            Log::warning("🚫 Sin horario configurado: oficina {$usuario->oficin_codigo}, día {$diaSemana}");
+        if (!$horarioEfectivo['horario']) {
+            Log::warning("🚫 Sin horario configurado: usuario {$usuario->usu_id}, día {$diaSemana}");
             return [
                 'puede_acceder' => false,
                 'tipo' => 'SIN_HORARIO',
@@ -226,63 +222,226 @@ class AuthController extends Controller
                     'oficina_codigo' => $usuario->oficin_codigo,
                     'dia_semana' => $diaSemana,
                     'fecha_actual' => $now->format('Y-m-d'),
-                    'hora_actual' => $horaActual
+                    'hora_actual' => $horaActual,
+                    'origen_horario' => $horarioEfectivo['origen']
                 ]
             ];
         }
 
         // Validar si está dentro del horario
-        $horaInicio = Carbon::createFromFormat('H:i:s', $horario->jorofi_horinicial);
-        $horaFin = Carbon::createFromFormat('H:i:s', $horario->jorofi_horfinal);
-        $horaConsulta = Carbon::createFromFormat('H:i:s', $horaActual);
-
-        $dentroDelHorario = false;
-        $cruzaMedianoche = $horaFin < $horaInicio;
-
-        if ($cruzaMedianoche) {
-            // Horario nocturno que cruza medianoche
-            $dentroDelHorario = $horaConsulta >= $horaInicio || $horaConsulta <= $horaFin;
-        } else {
-            // Horario normal
-            $dentroDelHorario = $horaConsulta >= $horaInicio && $horaConsulta <= $horaFin;
-        }
+        $dentroDelHorario = $this->estaDentroDelHorarioLogin(
+            $horaActual,
+            $horarioEfectivo['horario']['hora_entrada'],
+            $horarioEfectivo['horario']['hora_salida']
+        );
 
         if (!$dentroDelHorario) {
-            Log::warning("🚫 Fuera de horario: usuario {$usuario->usu_id}, oficina {$usuario->oficin_codigo}");
+            $tipoFallo = $this->determinarTipoFalloLogin($horarioEfectivo['origen']);
+            
+            Log::warning("🚫 Fuera de horario: usuario {$usuario->usu_id}, tipo {$horarioEfectivo['origen']}");
+            
             return [
                 'puede_acceder' => false,
-                'tipo' => 'FUERA_HORARIO',
-                'mensaje' => 'Fuera del horario permitido. Horario: ' . $horario->jorofi_horinicial . ' - ' . $horario->jorofi_horfinal,
-                'detalles' => [
+                'tipo' => $tipoFallo,
+                'mensaje' => "Fuera del horario {$horarioEfectivo['origen']}. Horario: {$horarioEfectivo['horario']['hora_entrada']} - {$horarioEfectivo['horario']['hora_salida']}",
+                'detalles' => array_merge([
                     'oficina_codigo' => $usuario->oficin_codigo,
-                    'dia_actual' => trim($horario->diasem_nombre),
                     'hora_actual' => $horaActual,
-                    'horario_inicio' => $horario->jorofi_horinicial,
-                    'horario_fin' => $horario->jorofi_horfinal,
-                    'cruza_medianoche' => $cruzaMedianoche,
-                    'jornada' => $horaInicio->hour < 12 ? 'MATUTINA' : 'NOCTURNA'
-                ]
+                    'horario_inicio' => $horarioEfectivo['horario']['hora_entrada'],
+                    'horario_fin' => $horarioEfectivo['horario']['hora_salida'],
+                    'origen_horario' => $horarioEfectivo['origen']
+                ], $horarioEfectivo['info_adicional'])
             ];
         }
 
         // ✅ ACCESO PERMITIDO
-        Log::info("✅ Acceso dentro de horario: usuario {$usuario->usu_id}, oficina {$usuario->oficin_codigo}");
+        Log::info("✅ Acceso permitido con horario {$horarioEfectivo['origen']}: usuario {$usuario->usu_id}");
         return [
             'puede_acceder' => true,
             'tipo' => 'DENTRO_HORARIO',
-            'mensaje' => 'Acceso permitido',
-            'detalles' => [
+            'mensaje' => "Acceso permitido con horario {$horarioEfectivo['origen']}",
+            'detalles' => array_merge([
                 'oficina_codigo' => $usuario->oficin_codigo,
-                'dia_actual' => trim($horario->diasem_nombre),
                 'hora_actual' => $horaActual,
-                'horario_inicio' => $horario->jorofi_horinicial,
-                'horario_fin' => $horario->jorofi_horfinal,
-                'cruza_medianoche' => $cruzaMedianoche,
-                'jornada' => $horaInicio->hour < 12 ? 'MATUTINA' : 'NOCTURNA'
+                'horario_inicio' => $horarioEfectivo['horario']['hora_entrada'],
+                'horario_fin' => $horarioEfectivo['horario']['hora_salida'],
+                'origen_horario' => $horarioEfectivo['origen']
+            ], $horarioEfectivo['info_adicional'])
+        ];
+
+    } catch (\Exception $e) {
+        Log::error("❌ Error en validación de horario de acceso: " . $e->getMessage(), [
+            'usuario_id' => $usuario->usu_id ?? 'unknown',
+            'file' => $e->getFile(),
+            'line' => $e->getLine()
+        ]);
+
+        // En caso de error, permitir acceso pero registrar
+        return [
+            'puede_acceder' => true,
+            'tipo' => 'ERROR_VALIDACION',
+            'mensaje' => 'Error en validación de horario - acceso permitido temporalmente',
+            'detalles' => [
+                'error_mensaje' => $e->getMessage()
             ]
         ];
     }
+}
 
+/**
+ * ✅ MÉTODO AUXILIAR: Obtener información de oficina con manejo de errores
+ */
+private function getOficinaInfo($oficinCodigo)
+{
+    try {
+        return DB::table('gaf_oficin')
+            ->where('oficin_codigo', $oficinCodigo)
+            ->first();
+    } catch (\Exception $e) {
+        Log::error("Error obteniendo información de oficina: " . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * ✅ MÉTODO AUXILIAR: Obtener horario efectivo para login
+ */
+private function obtenerHorarioEfectivoParaLogin($usuario, $diaSemana, $now)
+{
+    $horarioEfectivo = null;
+    $origenHorario = 'NINGUNO';
+    $infoAdicional = [];
+
+    try {
+        // 🥇 PRIORIDAD 1: Horario temporal
+        $horarioTemporal = DB::table('gaf_jorusu_temp')
+            ->where('temp_usu_id', $usuario->usu_id)
+            ->where('temp_diasem_codigo', $diaSemana)
+            ->where('temp_fecha_inicio', '<=', $now->format('Y-m-d'))
+            ->where('temp_fecha_fin', '>=', $now->format('Y-m-d'))
+            ->where('temp_activo', true)
+            ->first();
+
+        if ($horarioTemporal) {
+            $horarioEfectivo = [
+                'hora_entrada' => $horarioTemporal->temp_horentrada,
+                'hora_salida' => $horarioTemporal->temp_horsalida
+            ];
+            $origenHorario = 'TEMPORAL';
+            $infoAdicional = [
+                'tipo_temporal' => $horarioTemporal->temp_tipo,
+                'motivo_temporal' => $horarioTemporal->temp_motivo,
+                'fecha_fin_temporal' => $horarioTemporal->temp_fecha_fin
+            ];
+        }
+        // 🥈 PRIORIDAD 2: Horario personalizado permanente
+        elseif (!$horarioTemporal) {
+            $horarioPersonalizado = DB::table('gaf_jorusu')
+                ->where('jorusu_usu_id', $usuario->usu_id)
+                ->where('jorusu_diasem_codigo', $diaSemana)
+                ->first();
+
+            if ($horarioPersonalizado) {
+                $horarioEfectivo = [
+                    'hora_entrada' => $horarioPersonalizado->jorusu_horentrada,
+                    'hora_salida' => $horarioPersonalizado->jorusu_horsalida
+                ];
+                $origenHorario = 'PERSONALIZADO';
+            }
+            // 🥉 PRIORIDAD 3: Horario heredado de oficina
+            else {
+                $horarioOficina = DB::table('gaf_jorofi')
+                    ->leftJoin('gaf_diasem', 'gaf_jorofi.jorofi_diasem_codigo', '=', 'gaf_diasem.diasem_codigo')
+                    ->where('gaf_jorofi.jorofi_oficin_codigo', $usuario->oficin_codigo)
+                    ->where('gaf_jorofi.jorofi_diasem_codigo', $diaSemana)
+                    ->where('gaf_jorofi.jorofi_ctrhabil', 1)
+                    ->select('gaf_jorofi.*', 'gaf_diasem.diasem_nombre')
+                    ->first();
+
+                if ($horarioOficina) {
+                    $horarioEfectivo = [
+                        'hora_entrada' => $horarioOficina->jorofi_horinicial,
+                        'hora_salida' => $horarioOficina->jorofi_horfinal
+                    ];
+                    $origenHorario = 'HEREDADO_OFICINA';
+                }
+            }
+        }
+
+    } catch (\Exception $e) {
+        Log::error("Error obteniendo horario efectivo: " . $e->getMessage());
+    }
+
+    return [
+        'horario' => $horarioEfectivo,
+        'origen' => $origenHorario,
+        'info_adicional' => $infoAdicional
+    ];
+}
+
+/**
+ * ✅ MÉTODO AUXILIAR: Verificar si está dentro del horario para login
+ */
+private function estaDentroDelHorarioLogin($horaConsulta, $horaEntrada, $horaSalida)
+{
+    try {
+        $consulta = Carbon::createFromFormat('H:i:s', $horaConsulta);
+        $entrada = Carbon::createFromFormat('H:i', $horaEntrada);
+        $salida = Carbon::createFromFormat('H:i', $horaSalida);
+
+        // Verificar si el horario cruza medianoche
+        if ($salida < $entrada) {
+            // Horario nocturno que cruza medianoche
+            return $consulta >= $entrada || $consulta <= $salida;
+        } else {
+            // Horario normal
+            return $consulta >= $entrada && $consulta <= $salida;
+        }
+    } catch (\Exception $e) {
+        Log::error("Error verificando horario en login: " . $e->getMessage());
+        return true; // En caso de error, permitir acceso
+    }
+}
+
+/**
+ * ✅ MÉTODO AUXILIAR: Determinar tipo de fallo
+ */
+private function determinarTipoFalloLogin($origen)
+{
+    switch ($origen) {
+        case 'TEMPORAL':
+            return 'FUERA_HORARIO_TEMPORAL';
+        case 'PERSONALIZADO':
+            return 'FUERA_HORARIO_PERSONAL';
+        case 'HEREDADO_OFICINA':
+            return 'FUERA_HORARIO_OFICINA';
+        default:
+            return 'FUERA_HORARIO';
+    }
+}
+/**
+ * ✅ MÉTODO AUXILIAR: Verificar si una hora está dentro del rango
+ */
+private function estaDentroDelHorario($horaConsulta, $horaEntrada, $horaSalida)
+{
+    try {
+        $consulta = Carbon::createFromFormat('H:i', $horaConsulta);
+        $entrada = Carbon::createFromFormat('H:i', $horaEntrada);
+        $salida = Carbon::createFromFormat('H:i', $horaSalida);
+
+        // Verificar si el horario cruza medianoche (ej: 22:00 - 06:00)
+        if ($salida < $entrada) {
+            // Horario nocturno que cruza medianoche
+            return $consulta >= $entrada || $consulta <= $salida;
+        } else {
+            // Horario normal (ej: 08:00 - 17:00)
+            return $consulta >= $entrada && $consulta <= $salida;
+        }
+    } catch (\Exception $e) {
+        Log::error("Error verificando horario: " . $e->getMessage());
+        return false;
+    }
+}
     /**
      * ✅ NUEVO: Registrar intento fallido automáticamente
      */
@@ -425,13 +584,23 @@ class AuthController extends Controller
     public function verificarHorarioActivo(Request $request)
     {
         try {
+            // Si no hay header de Authorization, retornar que no está autenticado
+            if (!$request->hasHeader('Authorization')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No se encontró token de autenticación',
+                    'authenticated' => false
+                ], 200); // 200 porque es una consulta válida
+            }
+
             $user = $request->user();
             
             if (!$user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Usuario no autenticado',
-                    'debe_cerrar_sesion' => true
+                    'message' => 'Token de autenticación inválido',
+                    'debe_cerrar_sesion' => true,
+                    'authenticated' => false
                 ], 401);
             }
 
@@ -443,7 +612,8 @@ class AuthController extends Controller
                     'status' => 'error',
                     'message' => 'Su sesión ha sido revocada por el administrador',
                     'debe_cerrar_sesion' => true,
-                    'error' => 'USER_DISABLED'
+                    'error' => 'USER_DISABLED',
+                    'authenticated' => false
                 ], 403);
             }
 
@@ -459,7 +629,8 @@ class AuthController extends Controller
                     'message' => 'Su horario de acceso ha finalizado',
                     'debe_cerrar_sesion' => true,
                     'tipo_error' => $validacionHorario['tipo'],
-                    'detalles' => $validacionHorario['detalles']
+                    'detalles' => $validacionHorario['detalles'],
+                    'authenticated' => true
                 ], 403);
             }
 
@@ -470,15 +641,18 @@ class AuthController extends Controller
                 'status' => 'success',
                 'message' => 'Horario válido',
                 'horario_info' => $infoHorario,
-                'debe_cerrar_sesion' => false
+                'debe_cerrar_sesion' => false,
+                'authenticated' => true
             ]);
 
         } catch (\Exception $e) {
             Log::error("❌ Error verificando horario activo: " . $e->getMessage());
+            Log::error("❌ Stack trace: " . $e->getTraceAsString());
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error interno del servidor',
-                'debe_cerrar_sesion' => false
+                'message' => 'Error interno del servidor: ' . $e->getMessage(),
+                'debe_cerrar_sesion' => false,
+                'authenticated' => false
             ], 500);
         }
     }
@@ -880,4 +1054,93 @@ class AuthController extends Controller
             ->where('opc_id', $opcionId)
             ->exists();
     }
+    /**
+ * ✅ MÉTODO DE DEBUG: Para desarrollo y testing
+ */
+public function debugUserPermissions($userId)
+{
+    try {
+        $debug = [
+            'usuario_id' => $userId,
+            'timestamp' => Carbon::now(),
+            'validacion_horario' => $this->validarHorarioAccesoIndividual($userId),
+            'horarios_configurados' => []
+        ];
+
+        // Obtener todos los horarios del usuario
+        $debug['horarios_configurados']['temporales'] = DB::table('gaf_jorusu_temp')
+            ->where('temp_usu_id', $userId)
+            ->where('temp_activo', true)
+            ->get();
+
+        $debug['horarios_configurados']['personalizados'] = DB::table('gaf_jorusu')
+            ->where('jorusu_usu_id', $userId)
+            ->get();
+
+        $usuario = DB::table('tbl_usu')->where('usu_id', $userId)->first();
+        if ($usuario && $usuario->oficin_codigo) {
+            $debug['horarios_configurados']['oficina'] = DB::table('gaf_jorofi')
+                ->where('jorofi_oficin_codigo', $usuario->oficin_codigo)
+                ->where('jorofi_ctrhabil', 1)
+                ->get();
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'debug_info' => $debug
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error en debug: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * ✅ MÉTODO DE TESTING: Para probar horario de usuario
+ */
+public function testHorarioUsuario($usuarioId)
+{
+    try {
+        $usuario = DB::table('tbl_usu')->where('usu_id', $usuarioId)->first();
+        
+        if (!$usuario) {
+            return response()->json([
+                'error' => 'Usuario no encontrado'
+            ], 404);
+        }
+        
+        $validacion = $this->validarHorarioAcceso($usuario, request());
+        
+        return response()->json([
+            'usuario_id' => $usuarioId,
+            'validacion' => $validacion,
+            'timestamp' => now()
+        ]);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Error en test: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * ✅ MÉTODO AUXILIAR: Validación individual para debugging
+ */
+private function validarHorarioAccesoIndividual($userId)
+{
+    $usuario = DB::table('tbl_usu')->where('usu_id', $userId)->first();
+    
+    if (!$usuario) {
+        return [
+            'puede_acceder' => false,
+            'motivo' => 'USUARIO_NO_ENCONTRADO'
+        ];
+    }
+    
+    return $this->validarHorarioAcceso($usuario, request());
+}
 }

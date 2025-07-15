@@ -322,7 +322,7 @@ Route::middleware(['auth:sanctum', 'horario-individual'])->group(function () {
     Route::post('/button-permissions/assign-user', [ButtonPermissionController::class, 'assignUserButtonPermission']);
     Route::post('/button-permissions/validate', [ButtonPermissionController::class, 'validateUserButtonPermission']);
     Route::get('/button-permissions/summary', [ButtonPermissionController::class, 'getButtonPermissionsSummary']);
-    
+
     // =====================================================
     // 👤 GESTIÓN DE USUARIOS
     // =====================================================

@@ -70,6 +70,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [AuthController::class, 'user']);
     
     // ✅ NUEVAS RUTAS DE AUTENTICACIÓN DE HORARIOS
+    Route::post('/auth/verificar-horario', [AuthController::class, 'verificarHorarioActivo']);
     Route::get('/auth/verificar-horario', [AuthController::class, 'verificarHorarioActivo']);
 
     // =====================================================
@@ -319,7 +320,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/button-permissions/assign-user', [ButtonPermissionController::class, 'assignUserButtonPermission']);
     Route::post('/button-permissions/validate', [ButtonPermissionController::class, 'validateUserButtonPermission']);
     Route::get('/button-permissions/summary', [ButtonPermissionController::class, 'getButtonPermissionsSummary']);
-    
+
     // =====================================================
     // 👤 GESTIÓN DE USUARIOS (COMBINANDO AMBOS SISTEMAS)
     // =====================================================

@@ -282,7 +282,8 @@ class HorarioUsuarioController extends Controller
                 'dia_codigo' => 'required|integer|between:1,7|exists:gaf_diasem,diasem_codigo',
                 'hora_entrada' => 'required|date_format:H:i',
                 'hora_salida' => 'required|date_format:H:i|after:hora_entrada',
-                'observaciones' => 'nullable|string|max:500'
+                'observaciones' => 'nullable|string|max:500',
+                'forzar_creacion' => 'boolean' // Para permitir forzar en casos especiales
             ], [
                 'dia_codigo.required' => 'El día de la semana es requerido',
                 'dia_codigo.between' => 'El día debe estar entre 1 (Lunes) y 7 (Domingo)',
@@ -305,7 +306,9 @@ class HorarioUsuarioController extends Controller
 
             // Verificar que el usuario existe y obtener su oficina
             $usuario = DB::table('tbl_usu')
-                ->where('usu_id', $usuarioId)
+                ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+                ->where('tbl_usu.usu_id', $usuarioId)
+                ->select('tbl_usu.*', 'gaf_oficin.oficin_nombre')
                 ->first();
 
             if (!$usuario) {
@@ -316,44 +319,36 @@ class HorarioUsuarioController extends Controller
                 ], 404);
             }
 
-            // Validar que el horario esté dentro del rango de la oficina
-            if ($usuario->oficin_codigo) {
-                $horarioOficina = DB::table('gaf_jorofi')
-                    ->where('jorofi_oficin_codigo', $usuario->oficin_codigo)
-                    ->where('jorofi_diasem_codigo', $request->dia_codigo)
-                    ->where('jorofi_ctrhabil', 1)
-                    ->first();
+            if (!$usuario->oficin_codigo) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'El usuario no tiene oficina asignada',
+                    'data' => null
+                ], 422);
+            }
 
-                if ($horarioOficina) {
-                    $horaEntradaUsuario = Carbon::createFromFormat('H:i', $request->hora_entrada);
-                    $horaSalidaUsuario = Carbon::createFromFormat('H:i', $request->hora_salida);
-                    $horaEntradaOficina = Carbon::createFromFormat('H:i', $horarioOficina->jorofi_horinicial);
-                    $horaSalidaOficina = Carbon::createFromFormat('H:i', $horarioOficina->jorofi_horfinal);
+            // ✅ VALIDACIÓN AUTOMÁTICA CONTRA HORARIO DE OFICINA
+            $validacionOficina = $this->validarContraHorarioOficina(
+                $usuario->oficin_codigo,
+                $request->dia_codigo,
+                $request->hora_entrada,
+                $request->hora_salida
+            );
 
-                    // Validar que esté dentro del rango de la oficina
-                    if ($horaEntradaUsuario < $horaEntradaOficina || $horaSalidaUsuario > $horaSalidaOficina) {
-                        return response()->json([
-                            'status' => 'error',
-                            'message' => 'El horario debe estar dentro del rango de la oficina',
-                            'data' => [
-                                'horario_oficina' => [
-                                    'hora_entrada' => $horarioOficina->jorofi_horinicial,
-                                    'hora_salida' => $horarioOficina->jorofi_horfinal
-                                ],
-                                'horario_solicitado' => [
-                                    'hora_entrada' => $request->hora_entrada,
-                                    'hora_salida' => $request->hora_salida
-                                ]
-                            ]
-                        ], 422);
-                    }
-                } else {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'La oficina no tiene horario configurado para este día',
-                        'data' => null
-                    ], 422);
-                }
+            if (!$validacionOficina['valido'] && !$request->get('forzar_creacion', false)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'El horario personalizado debe estar dentro del rango de la oficina',
+                    'data' => [
+                        'motivo_rechazo' => $validacionOficina['motivo'],
+                        'horario_oficina' => $validacionOficina['horario_oficina'] ?? null,
+                        'horario_solicitado' => [
+                            'hora_entrada' => $request->hora_entrada,
+                            'hora_salida' => $request->hora_salida
+                        ],
+                        'sugerencias' => $this->generarSugerenciasHorario($validacionOficina)
+                    ]
+                ], 422);
             }
 
             DB::beginTransaction();
@@ -399,7 +394,9 @@ class HorarioUsuarioController extends Controller
                 'hora_salida' => $request->hora_salida,
                 'jornada' => $horaEntrada->hour < 12 ? 'MATUTINA' : 'NOCTURNA',
                 'formato_visual' => "{$request->hora_entrada} - {$request->hora_salida}",
-                'observaciones' => $request->observaciones
+                'observaciones' => $request->observaciones,
+                'validacion_oficina' => $validacionOficina,
+                'forzado' => $request->get('forzar_creacion', false)
             ];
 
             DB::commit();
@@ -407,7 +404,8 @@ class HorarioUsuarioController extends Controller
             Log::info("✅ Horario personalizado {$operacion} exitosamente:", [
                 'usuario_id' => $usuarioId,
                 'dia' => $diaInfo->diasem_nombre,
-                'horario' => "{$request->hora_entrada} - {$request->hora_salida}"
+                'horario' => "{$request->hora_entrada} - {$request->hora_salida}",
+                'validacion_oficina' => $validacionOficina['valido']
             ]);
 
             return response()->json([
@@ -416,17 +414,6 @@ class HorarioUsuarioController extends Controller
                 'data' => $horarioConfigurado
             ], $horarioExistente ? 200 : 201);
 
-        } catch (\Illuminate\Database\QueryException $e) {
-            DB::rollBack();
-            Log::error("❌ Error de base de datos creando horario usuario: " . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error de base de datos al guardar horario',
-                'data' => [
-                    'error_code' => $e->getCode(),
-                    'sql_state' => $e->errorInfo[0] ?? null
-                ]
-            ], 500);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("❌ Error creando horario usuario: " . $e->getMessage());
@@ -452,16 +439,8 @@ class HorarioUsuarioController extends Controller
                 'horarios.*.hora_entrada' => 'required|date_format:H:i',
                 'horarios.*.hora_salida' => 'required|date_format:H:i',
                 'sobrescribir_existentes' => 'boolean',
-                'validar_contra_oficina' => 'boolean'
-            ], [
-                'horarios.required' => 'Los horarios son requeridos',
-                'horarios.array' => 'Los horarios deben ser un array',
-                'horarios.min' => 'Debe proporcionar al menos un horario',
-                'horarios.max' => 'No puede proporcionar más de 7 horarios (uno por día)',
-                'horarios.*.dia_codigo.required' => 'El día de la semana es requerido para cada horario',
-                'horarios.*.dia_codigo.between' => 'El día debe estar entre 1 (Lunes) y 7 (Domingo)',
-                'horarios.*.hora_entrada.required' => 'La hora de entrada es requerida para cada horario',
-                'horarios.*.hora_salida.required' => 'La hora de salida es requerida para cada horario'
+                'validar_contra_oficina' => 'boolean',
+                'forzar_creacion' => 'boolean'
             ]);
 
             if ($validator->fails()) {
@@ -475,7 +454,9 @@ class HorarioUsuarioController extends Controller
 
             // Verificar que el usuario existe
             $usuario = DB::table('tbl_usu')
-                ->where('usu_id', $usuarioId)
+                ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+                ->where('tbl_usu.usu_id', $usuarioId)
+                ->select('tbl_usu.*', 'gaf_oficin.oficin_nombre')
                 ->first();
 
             if (!$usuario) {
@@ -486,7 +467,15 @@ class HorarioUsuarioController extends Controller
                 ], 404);
             }
 
-            // Validar que no haya días duplicados en el request
+            if (!$usuario->oficin_codigo) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'El usuario no tiene oficina asignada',
+                    'data' => null
+                ], 422);
+            }
+
+            // Validar que no haya días duplicados
             $diasEnviados = array_column($request->horarios, 'dia_codigo');
             if (count($diasEnviados) !== count(array_unique($diasEnviados))) {
                 return response()->json([
@@ -496,48 +485,45 @@ class HorarioUsuarioController extends Controller
                 ], 422);
             }
 
-            // Obtener horarios de oficina si se requiere validación
-            $horariosOficina = [];
-            if ($request->get('validar_contra_oficina', true) && $usuario->oficin_codigo) {
-                $horariosOficina = DB::table('gaf_jorofi')
-                    ->where('jorofi_oficin_codigo', $usuario->oficin_codigo)
-                    ->where('jorofi_ctrhabil', 1)
-                    ->get()
-                    ->keyBy('jorofi_diasem_codigo');
-            }
+            $validarContraOficina = $request->get('validar_contra_oficina', true);
+            $forzarCreacion = $request->get('forzar_creacion', false);
+            $horariosInvalidos = [];
 
-            // Validar horarios individuales
-            foreach ($request->horarios as $index => $horario) {
-                $horaEntrada = Carbon::createFromFormat('H:i', $horario['hora_entrada']);
-                $horaSalida = Carbon::createFromFormat('H:i', $horario['hora_salida']);
-                
-                if ($horaSalida <= $horaEntrada && !($horaEntrada->hour >= 18 && $horaSalida->hour <= 10)) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => "Horario inválido en posición {$index}: La hora de salida debe ser posterior a la hora de entrada",
-                        'data' => null
-                    ], 422);
+            // ✅ VALIDAR TODOS LOS HORARIOS CONTRA OFICINA
+            if ($validarContraOficina && !$forzarCreacion) {
+                foreach ($request->horarios as $index => $horario) {
+                    $validacion = $this->validarContraHorarioOficina(
+                        $usuario->oficin_codigo,
+                        $horario['dia_codigo'],
+                        $horario['hora_entrada'],
+                        $horario['hora_salida']
+                    );
+
+                    if (!$validacion['valido']) {
+                        $horariosInvalidos[] = [
+                            'indice' => $index,
+                            'dia_codigo' => $horario['dia_codigo'],
+                            'dia_nombre' => $validacion['dia_nombre'],
+                            'motivo' => $validacion['motivo'],
+                            'horario_solicitado' => [
+                                'entrada' => $horario['hora_entrada'],
+                                'salida' => $horario['hora_salida']
+                            ],
+                            'horario_oficina' => $validacion['horario_oficina']
+                        ];
+                    }
                 }
 
-                // Validar contra horario de oficina
-                if (isset($horariosOficina[$horario['dia_codigo']])) {
-                    $horarioOficina = $horariosOficina[$horario['dia_codigo']];
-                    $horaEntradaOficina = Carbon::createFromFormat('H:i', $horarioOficina->jorofi_horinicial);
-                    $horaSalidaOficina = Carbon::createFromFormat('H:i', $horarioOficina->jorofi_horfinal);
-
-                    if ($horaEntrada < $horaEntradaOficina || $horaSalida > $horaSalidaOficina) {
-                        return response()->json([
-                            'status' => 'error',
-                            'message' => "Horario en posición {$index} está fuera del rango de la oficina",
-                            'data' => [
-                                'dia_codigo' => $horario['dia_codigo'],
-                                'horario_oficina' => [
-                                    'entrada' => $horarioOficina->jorofi_horinicial,
-                                    'salida' => $horarioOficina->jorofi_horfinal
-                                ]
-                            ]
-                        ], 422);
-                    }
+                if (!empty($horariosInvalidos)) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Algunos horarios están fuera del rango de la oficina',
+                        'data' => [
+                            'horarios_invalidos' => $horariosInvalidos,
+                            'total_invalidos' => count($horariosInvalidos),
+                            'puede_forzar' => true
+                        ]
+                    ], 422);
                 }
             }
 
@@ -599,7 +585,8 @@ class HorarioUsuarioController extends Controller
                 'creados' => $resultados['creados'],
                 'actualizados' => $resultados['actualizados'],
                 'saltados' => $resultados['saltados'],
-                'errores' => count($resultados['errores'])
+                'errores' => count($resultados['errores']),
+                'validacion_oficina' => $validarContraOficina
             ]);
 
             return response()->json([
@@ -608,7 +595,9 @@ class HorarioUsuarioController extends Controller
                 'data' => [
                     'usuario_id' => $usuarioId,
                     'resultados' => $resultados,
-                    'total_procesados' => $totalProcesados
+                    'total_procesados' => $totalProcesados,
+                    'validacion_aplicada' => $validarContraOficina,
+                    'forzado' => $forzarCreacion
                 ]
             ]);
 
@@ -2319,6 +2308,236 @@ class HorarioUsuarioController extends Controller
                 'message' => 'Error al limpiar horarios vencidos: ' . $e->getMessage(),
                 'data' => null
             ], 500);
+        }
+    }
+    
+
+    /**
+     * ✅ VALIDAR HORARIO INDIVIDUAL CONTRA HORARIO DE OFICINA
+     */
+    private function validarContraHorarioOficina($oficinaCodigo, $diaCodigo, $horaEntrada, $horaSalida)
+    {
+        try {
+            // Obtener horario de oficina para el día específico
+            $horarioOficina = DB::table('gaf_jorofi')
+                ->leftJoin('gaf_diasem', 'gaf_jorofi.jorofi_diasem_codigo', '=', 'gaf_diasem.diasem_codigo')
+                ->where('gaf_jorofi.jorofi_oficin_codigo', $oficinaCodigo)
+                ->where('gaf_jorofi.jorofi_diasem_codigo', $diaCodigo)
+                ->where('gaf_jorofi.jorofi_ctrhabil', 1)
+                ->select('gaf_jorofi.*', 'gaf_diasem.diasem_nombre')
+                ->first();
+
+            if (!$horarioOficina) {
+                return [
+                    'valido' => false,
+                    'motivo' => 'La oficina no tiene horario configurado para este día',
+                    'dia_nombre' => null,
+                    'horario_oficina' => null
+                ];
+            }
+
+            $entradaUsuario = Carbon::createFromFormat('H:i', $horaEntrada);
+            $salidaUsuario = Carbon::createFromFormat('H:i', $horaSalida);
+            $entradaOficina = Carbon::createFromFormat('H:i', $horarioOficina->jorofi_horinicial);
+            $salidaOficina = Carbon::createFromFormat('H:i', $horarioOficina->jorofi_horfinal);
+
+            // Manejar horarios que cruzan medianoche
+            $oficinaCruzaMedianoche = $salidaOficina < $entradaOficina;
+            $usuarioCruzaMedianoche = $salidaUsuario < $entradaUsuario;
+
+            $validoHorario = false;
+
+            if ($oficinaCruzaMedianoche) {
+                // La oficina cruza medianoche (ej: 22:00 - 06:00)
+                if ($usuarioCruzaMedianoche) {
+                    // Usuario también cruza medianoche
+                    $validoHorario = ($entradaUsuario >= $entradaOficina || $entradaUsuario <= $salidaOficina) &&
+                                   ($salidaUsuario >= $entradaOficina || $salidaUsuario <= $salidaOficina);
+                } else {
+                    // Usuario no cruza medianoche
+                    $validoHorario = ($entradaUsuario >= $entradaOficina || $entradaUsuario <= $salidaOficina) &&
+                                   ($salidaUsuario >= $entradaOficina || $salidaUsuario <= $salidaOficina);
+                }
+            } else {
+                // Horario normal de oficina
+                $validoHorario = $entradaUsuario >= $entradaOficina && $salidaUsuario <= $salidaOficina;
+            }
+
+            return [
+                'valido' => $validoHorario,
+                'motivo' => $validoHorario ? 'Horario válido' : 'Horario fuera del rango de oficina',
+                'dia_nombre' => trim($horarioOficina->diasem_nombre),
+                'horario_oficina' => [
+                    'hora_entrada' => $horarioOficina->jorofi_horinicial,
+                    'hora_salida' => $horarioOficina->jorofi_horfinal,
+                    'cruza_medianoche' => $oficinaCruzaMedianoche
+                ],
+                'horario_usuario' => [
+                    'hora_entrada' => $horaEntrada,
+                    'hora_salida' => $horaSalida,
+                    'cruza_medianoche' => $usuarioCruzaMedianoche
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            Log::error("Error validando horario contra oficina: " . $e->getMessage());
+            return [
+                'valido' => false,
+                'motivo' => 'Error en validación: ' . $e->getMessage(),
+                'dia_nombre' => null,
+                'horario_oficina' => null
+            ];
+        }
+    }
+
+    /**
+     * ✅ GENERAR SUGERENCIAS DE HORARIO
+     */
+    private function generarSugerenciasHorario($validacionOficina)
+    {
+        $sugerencias = [];
+
+        if (isset($validacionOficina['horario_oficina'])) {
+            $horarioOficina = $validacionOficina['horario_oficina'];
+            
+            $sugerencias[] = [
+                'tipo' => 'horario_completo_oficina',
+                'descripcion' => 'Usar el horario completo de la oficina',
+                'hora_entrada' => $horarioOficina['hora_entrada'],
+                'hora_salida' => $horarioOficina['hora_salida']
+            ];
+
+            // Sugerir horario reducido dentro del rango
+            $entradaOficina = Carbon::createFromFormat('H:i', $horarioOficina['hora_entrada']);
+            $salidaOficina = Carbon::createFromFormat('H:i', $horarioOficina['hora_salida']);
+
+            if (!$horarioOficina['cruza_medianoche']) {
+                // Sugerir entrada 1 hora después
+                $entradaSugerida = $entradaOficina->copy()->addHour();
+                if ($entradaSugerida < $salidaOficina) {
+                    $sugerencias[] = [
+                        'tipo' => 'entrada_tardia',
+                        'descripcion' => 'Entrada 1 hora después del inicio de oficina',
+                        'hora_entrada' => $entradaSugerida->format('H:i'),
+                        'hora_salida' => $horarioOficina['hora_salida']
+                    ];
+                }
+
+                // Sugerir salida 1 hora antes
+                $salidaSugerida = $salidaOficina->copy()->subHour();
+                if ($salidaSugerida > $entradaOficina) {
+                    $sugerencias[] = [
+                        'tipo' => 'salida_temprana',
+                        'descripcion' => 'Salida 1 hora antes del cierre de oficina',
+                        'hora_entrada' => $horarioOficina['hora_entrada'],
+                        'hora_salida' => $salidaSugerida->format('H:i')
+                    ];
+                }
+            }
+        }
+
+        return $sugerencias;
+    }
+
+    /**
+     * ✅ BATCH CON VALIDACIÓN AUTOMÁTICA
+     */
+    
+
+    /**
+     * ✅ MÉTODO PARA OBTENER HORARIO EFECTIVO (USADO POR MIDDLEWARE)
+     */
+    public function obtenerHorarioEfectivo($usuarioId, $fecha = null)
+    {
+        try {
+            $fechaConsulta = $fecha ? Carbon::parse($fecha) : Carbon::now('America/Guayaquil');
+            $diaSemana = $fechaConsulta->dayOfWeekIso;
+
+            $usuario = DB::table('tbl_usu')->where('usu_id', $usuarioId)->first();
+            if (!$usuario) {
+                return [
+                    'horario' => null,
+                    'origen' => 'USUARIO_NO_ENCONTRADO',
+                    'mensaje' => 'Usuario no encontrado'
+                ];
+            }
+
+            // 🥇 PRIORIDAD 1: Horario temporal
+            $horarioTemporal = DB::table('gaf_jorusu_temp')
+                ->where('temp_usu_id', $usuarioId)
+                ->where('temp_diasem_codigo', $diaSemana)
+                ->where('temp_fecha_inicio', '<=', $fechaConsulta->format('Y-m-d'))
+                ->where('temp_fecha_fin', '>=', $fechaConsulta->format('Y-m-d'))
+                ->where('temp_activo', true)
+                ->first();
+
+            if ($horarioTemporal) {
+                return [
+                    'horario' => [
+                        'hora_entrada' => $horarioTemporal->temp_horentrada,
+                        'hora_salida' => $horarioTemporal->temp_horsalida
+                    ],
+                    'origen' => 'TEMPORAL',
+                    'mensaje' => 'Horario temporal activo',
+                    'info_adicional' => [
+                        'tipo' => $horarioTemporal->temp_tipo,
+                        'motivo' => $horarioTemporal->temp_motivo,
+                        'fecha_fin' => $horarioTemporal->temp_fecha_fin
+                    ]
+                ];
+            }
+
+            // 🥈 PRIORIDAD 2: Horario personalizado
+            $horarioPersonalizado = DB::table('gaf_jorusu')
+                ->where('jorusu_usu_id', $usuarioId)
+                ->where('jorusu_diasem_codigo', $diaSemana)
+                ->first();
+
+            if ($horarioPersonalizado) {
+                return [
+                    'horario' => [
+                        'hora_entrada' => $horarioPersonalizado->jorusu_horentrada,
+                        'hora_salida' => $horarioPersonalizado->jorusu_horsalida
+                    ],
+                    'origen' => 'PERSONALIZADO',
+                    'mensaje' => 'Horario personalizado del usuario'
+                ];
+            }
+
+            // 🥉 PRIORIDAD 3: Horario de oficina
+            if ($usuario->oficin_codigo) {
+                $horarioOficina = DB::table('gaf_jorofi')
+                    ->where('jorofi_oficin_codigo', $usuario->oficin_codigo)
+                    ->where('jorofi_diasem_codigo', $diaSemana)
+                    ->where('jorofi_ctrhabil', 1)
+                    ->first();
+
+                if ($horarioOficina) {
+                    return [
+                        'horario' => [
+                            'hora_entrada' => $horarioOficina->jorofi_horinicial,
+                            'hora_salida' => $horarioOficina->jorofi_horfinal
+                        ],
+                        'origen' => 'HEREDADO_OFICINA',
+                        'mensaje' => 'Horario heredado de la oficina'
+                    ];
+                }
+            }
+
+            // ❌ Sin horario
+            return [
+                'horario' => null,
+                'origen' => 'SIN_HORARIO',
+                'mensaje' => 'No hay horario configurado'
+            ];
+
+        } catch (\Exception $e) {
+            Log::error("Error obteniendo horario efectivo: " . $e->getMessage());
+            return [
+                'horario' => null,
+                'origen' => 'ERROR',
+                'mensaje' => 'Error al obtener horario'
+            ];
         }
     }
 }

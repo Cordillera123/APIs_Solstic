@@ -2145,5 +2145,137 @@ public function cleanupBrokenPermissions()
             ], 500);
         }
     }
+
+   
+// Archivo: app/Http/Controllers/Api/UsuarioController.php
+// AGREGAR ESTE MÉTODO DESPUÉS DEL MÉTODO meOficina() (línea 270 aproximadamente)
+
+/**
+ * ✅ MÉTODO FALTANTE: Resumen del usuario logueado
+ * GET /api/usuarios/me/resumen
+ */
+public function meResumen(Request $request)
+{
+    try {
+        $user = $request->user();
+        
+        if (!$user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no autenticado',
+                'data' => null
+            ], 401);
+        }
+
+        Log::info("📊 Obteniendo resumen del usuario logueado: {$user->usu_id}");
+
+        // Consulta optimizada para resumen
+        $resumen = DB::table('tbl_usu')
+            ->leftJoin('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
+            ->leftJoin('tbl_est', 'tbl_usu.est_id', '=', 'tbl_est.est_id')
+            ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+            ->leftJoin('gaf_tofici', 'gaf_oficin.oficin_tofici_codigo', '=', 'gaf_tofici.tofici_codigo')
+            ->leftJoin('gaf_instit', 'gaf_oficin.oficin_instit_codigo', '=', 'gaf_instit.instit_codigo')
+            ->where('tbl_usu.usu_id', $user->usu_id)
+            ->select([
+                'tbl_usu.usu_id',
+                'tbl_usu.usu_nom',
+                'tbl_usu.usu_nom2',
+                'tbl_usu.usu_ape',
+                'tbl_usu.usu_ape2',
+                'tbl_usu.usu_cor',
+                'tbl_usu.usu_ced',
+                'tbl_usu.usu_ultimo_acceso',
+                'tbl_usu.usu_fecha_registro',
+                'tbl_per.per_id',
+                'tbl_per.per_nom as perfil',
+                'tbl_est.est_nom as estado',
+                'tbl_usu.oficin_codigo',
+                'gaf_oficin.oficin_nombre',
+                'gaf_tofici.tofici_descripcion as tipo_oficina',
+                'gaf_instit.instit_codigo',
+                'gaf_instit.instit_nombre',
+                DB::raw("CONCAT(COALESCE(tbl_usu.usu_nom, ''), ' ', COALESCE(tbl_usu.usu_nom2, ''), ' ', COALESCE(tbl_usu.usu_ape, ''), ' ', COALESCE(tbl_usu.usu_ape2, '')) as nombre_completo")
+            ])
+            ->first();
+
+        if (!$resumen) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No se encontró información del usuario',
+                'data' => null
+            ], 404);
+        }
+
+        // Contar permisos del usuario
+        $totalPermisos = DB::table('tbl_usu_perm')
+            ->where('usu_id', $user->usu_id)
+            ->count();
+
+        // Información de horario simplificada
+        $infoHorario = null;
+        if ($resumen->oficin_codigo) {
+            $now = now();
+            $diaSemana = $now->dayOfWeekIso;
+            
+            $horarioHoy = DB::table('gaf_jorofi')
+                ->where('jorofi_oficin_codigo', $resumen->oficin_codigo)
+                ->where('jorofi_diasem_codigo', $diaSemana)
+                ->where('jorofi_ctrhabil', 1)
+                ->first();
+
+            if ($horarioHoy) {
+                $infoHorario = [
+                    'tiene_horario_hoy' => true,
+                    'horario_inicio' => $horarioHoy->jorofi_horinicial,
+                    'horario_fin' => $horarioHoy->jorofi_horfinal,
+                    'formato_visual' => $horarioHoy->jorofi_horinicial . ' - ' . $horarioHoy->jorofi_horfinal
+                ];
+            }
+        }
+
+        $response = [
+            'usuario' => [
+                'usu_id' => $resumen->usu_id,
+                'nombre_completo' => trim($resumen->nombre_completo),
+                'usu_cor' => $resumen->usu_cor,
+                'usu_ced' => $resumen->usu_ced,
+                'perfil' => $resumen->perfil,
+                'estado' => $resumen->estado,
+                'ultimo_acceso' => $resumen->usu_ultimo_acceso,
+                'fecha_registro' => $resumen->usu_fecha_registro
+            ],
+            'oficina' => [
+                'oficin_codigo' => $resumen->oficin_codigo,
+                'oficin_nombre' => $resumen->oficin_nombre,
+                'tipo_oficina' => $resumen->tipo_oficina,
+                'tiene_oficina' => !is_null($resumen->oficin_codigo)
+            ],
+            'institucion' => [
+                'instit_codigo' => $resumen->instit_codigo,
+                'instit_nombre' => $resumen->instit_nombre
+            ],
+            'permisos' => [
+                'total_asignados' => $totalPermisos,
+                'es_super_admin' => $resumen->per_id == 3
+            ],
+            'horario_info' => $infoHorario
+        ];
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Resumen del usuario obtenido correctamente',
+            'data' => $response
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error("❌ Error obteniendo resumen del usuario: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error interno del servidor',
+            'data' => null
+        ], 500);
+    }
+}
     
 }

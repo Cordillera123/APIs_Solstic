@@ -274,156 +274,156 @@ class HorarioUsuarioController extends Controller
      * POST /api/usuarios/{usuarioId}/horarios
      */
     public function store($usuarioId, Request $request)
-    {
-        try {
-            Log::info("🕐 Creando/actualizando horario personalizado para usuario {$usuarioId}");
-            
-            $validator = Validator::make($request->all(), [
-                'dia_codigo' => 'required|integer|between:1,7|exists:gaf_diasem,diasem_codigo',
-                'hora_entrada' => 'required|date_format:H:i',
-                'hora_salida' => 'required|date_format:H:i|after:hora_entrada',
-                'observaciones' => 'nullable|string|max:500',
-                'forzar_creacion' => 'boolean' // Para permitir forzar en casos especiales
-            ], [
-                'dia_codigo.required' => 'El día de la semana es requerido',
-                'dia_codigo.between' => 'El día debe estar entre 1 (Lunes) y 7 (Domingo)',
-                'dia_codigo.exists' => 'El día seleccionado no es válido',
-                'hora_entrada.required' => 'La hora de entrada es requerida',
-                'hora_entrada.date_format' => 'La hora de entrada debe tener formato HH:MM',
-                'hora_salida.required' => 'La hora de salida es requerida',
-                'hora_salida.date_format' => 'La hora de salida debe tener formato HH:MM',
-                'hora_salida.after' => 'La hora de salida debe ser posterior a la hora de entrada'
-            ]);
+{
+    try {
+        Log::info("🕐 Creando/actualizando horario personalizado para usuario {$usuarioId}");
+        
+        $validator = Validator::make($request->all(), [
+            'dia_codigo' => 'required|integer|between:1,7|exists:gaf_diasem,diasem_codigo',
+            'hora_entrada' => 'required|date_format:H:i',
+            'hora_salida' => 'required|date_format:H:i|after:hora_entrada',
+            'observaciones' => 'nullable|string|max:500',
+            'forzar_creacion' => 'boolean' // Para permitir forzar en casos especiales
+        ], [
+            'dia_codigo.required' => 'El día de la semana es requerido',
+            'dia_codigo.between' => 'El día debe estar entre 1 (Lunes) y 7 (Domingo)',
+            'dia_codigo.exists' => 'El día seleccionado no es válido',
+            'hora_entrada.required' => 'La hora de entrada es requerida',
+            'hora_entrada.date_format' => 'La hora de entrada debe tener formato HH:MM',
+            'hora_salida.required' => 'La hora de salida es requerida',
+            'hora_salida.date_format' => 'La hora de salida debe tener formato HH:MM',
+            'hora_salida.after' => 'La hora de salida debe ser posterior a la hora de entrada'
+        ]);
 
-            if ($validator->fails()) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Datos de validación incorrectos',
-                    'errors' => $validator->errors(),
-                    'data' => null
-                ], 422);
-            }
-
-            // Verificar que el usuario existe y obtener su oficina
-            $usuario = DB::table('tbl_usu')
-                ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
-                ->where('tbl_usu.usu_id', $usuarioId)
-                ->select('tbl_usu.*', 'gaf_oficin.oficin_nombre')
-                ->first();
-
-            if (!$usuario) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Usuario no encontrado',
-                    'data' => null
-                ], 404);
-            }
-
-            if (!$usuario->oficin_codigo) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'El usuario no tiene oficina asignada',
-                    'data' => null
-                ], 422);
-            }
-
-            // ✅ VALIDACIÓN AUTOMÁTICA CONTRA HORARIO DE OFICINA
-            $validacionOficina = $this->validarContraHorarioOficina(
-                $usuario->oficin_codigo,
-                $request->dia_codigo,
-                $request->hora_entrada,
-                $request->hora_salida
-            );
-
-            if (!$validacionOficina['valido'] && !$request->get('forzar_creacion', false)) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'El horario personalizado debe estar dentro del rango de la oficina',
-                    'data' => [
-                        'motivo_rechazo' => $validacionOficina['motivo'],
-                        'horario_oficina' => $validacionOficina['horario_oficina'] ?? null,
-                        'horario_solicitado' => [
-                            'hora_entrada' => $request->hora_entrada,
-                            'hora_salida' => $request->hora_salida
-                        ],
-                        'sugerencias' => $this->generarSugerenciasHorario($validacionOficina)
-                    ]
-                ], 422);
-            }
-
-            DB::beginTransaction();
-
-            $horarioData = [
-                'jorusu_usu_id' => $usuarioId,
-                'jorusu_diasem_codigo' => $request->dia_codigo,
-                'jorusu_horentrada' => $request->hora_entrada,
-                'jorusu_horsalida' => $request->hora_salida
-            ];
-
-            // Verificar si ya existe horario para este día
-            $horarioExistente = DB::table('gaf_jorusu')
-                ->where('jorusu_usu_id', $usuarioId)
-                ->where('jorusu_diasem_codigo', $request->dia_codigo)
-                ->first();
-
-            $operacion = '';
-            if ($horarioExistente) {
-                // Actualizar horario existente
-                DB::table('gaf_jorusu')
-                    ->where('jorusu_usu_id', $usuarioId)
-                    ->where('jorusu_diasem_codigo', $request->dia_codigo)
-                    ->update($horarioData);
-                $operacion = 'actualizado';
-            } else {
-                // Crear nuevo horario
-                DB::table('gaf_jorusu')->insert($horarioData);
-                $operacion = 'creado';
-            }
-
-            // Obtener información del día configurado
-            $diaInfo = DB::table('gaf_diasem')
-                ->where('diasem_codigo', $request->dia_codigo)
-                ->first();
-
-            $horaEntrada = Carbon::createFromFormat('H:i', $request->hora_entrada);
-            $horarioConfigurado = [
-                'usuario_id' => $usuarioId,
-                'dia_codigo' => $request->dia_codigo,
-                'dia_nombre' => trim($diaInfo->diasem_nombre),
-                'hora_entrada' => $request->hora_entrada,
-                'hora_salida' => $request->hora_salida,
-                'jornada' => $horaEntrada->hour < 12 ? 'MATUTINA' : 'NOCTURNA',
-                'formato_visual' => "{$request->hora_entrada} - {$request->hora_salida}",
-                'observaciones' => $request->observaciones,
-                'validacion_oficina' => $validacionOficina,
-                'forzado' => $request->get('forzar_creacion', false)
-            ];
-
-            DB::commit();
-
-            Log::info("✅ Horario personalizado {$operacion} exitosamente:", [
-                'usuario_id' => $usuarioId,
-                'dia' => $diaInfo->diasem_nombre,
-                'horario' => "{$request->hora_entrada} - {$request->hora_salida}",
-                'validacion_oficina' => $validacionOficina['valido']
-            ]);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => "Horario personalizado {$operacion} exitosamente para " . trim($diaInfo->diasem_nombre),
-                'data' => $horarioConfigurado
-            ], $horarioExistente ? 200 : 201);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error("❌ Error creando horario usuario: " . $e->getMessage());
+        if ($validator->fails()) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al crear horario: ' . $e->getMessage(),
+                'message' => 'Datos de validación incorrectos',
+                'errors' => $validator->errors(),
                 'data' => null
-            ], 500);
+            ], 422);
         }
+
+        // Verificar que el usuario existe y obtener su oficina
+        $usuario = DB::table('tbl_usu')
+            ->leftJoin('gaf_oficin', 'tbl_usu.oficin_codigo', '=', 'gaf_oficin.oficin_codigo')
+            ->where('tbl_usu.usu_id', $usuarioId)
+            ->select('tbl_usu.*', 'gaf_oficin.oficin_nombre')
+            ->first();
+
+        if (!$usuario) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no encontrado',
+                'data' => null
+            ], 404);
+        }
+
+        if (!$usuario->oficin_codigo) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El usuario no tiene oficina asignada',
+                'data' => null
+            ], 422);
+        }
+
+        // ✅ VALIDACIÓN AUTOMÁTICA CONTRA HORARIO DE OFICINA
+        $validacionOficina = $this->validarContraHorarioOficina(
+            $usuario->oficin_codigo,
+            $request->dia_codigo,
+            $request->hora_entrada,
+            $request->hora_salida
+        );
+
+        if (!$validacionOficina['valido'] && !$request->get('forzar_creacion', false)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El horario personalizado debe estar dentro del rango de la oficina',
+                'data' => [
+                    'motivo_rechazo' => $validacionOficina['motivo'],
+                    'horario_oficina' => $validacionOficina['horario_oficina'] ?? null,
+                    'horario_solicitado' => [
+                        'hora_entrada' => $request->hora_entrada,
+                        'hora_salida' => $request->hora_salida
+                    ],
+                    'sugerencias' => $this->generarSugerenciasHorario($validacionOficina)
+                ]
+            ], 422);
+        }
+
+        DB::beginTransaction();
+
+        $horarioData = [
+            'jorusu_usu_id' => $usuarioId,
+            'jorusu_diasem_codigo' => $request->dia_codigo,
+            'jorusu_horentrada' => $request->hora_entrada,
+            'jorusu_horsalida' => $request->hora_salida
+        ];
+
+        // Verificar si ya existe horario para este día
+        $horarioExistente = DB::table('gaf_jorusu')
+            ->where('jorusu_usu_id', $usuarioId)
+            ->where('jorusu_diasem_codigo', $request->dia_codigo)
+            ->first();
+
+        $operacion = '';
+        if ($horarioExistente) {
+            // Actualizar horario existente
+            DB::table('gaf_jorusu')
+                ->where('jorusu_usu_id', $usuarioId)
+                ->where('jorusu_diasem_codigo', $request->dia_codigo)
+                ->update($horarioData);
+            $operacion = 'actualizado';
+        } else {
+            // Crear nuevo horario
+            DB::table('gaf_jorusu')->insert($horarioData);
+            $operacion = 'creado';
+        }
+
+        // Obtener información del día configurado
+        $diaInfo = DB::table('gaf_diasem')
+            ->where('diasem_codigo', $request->dia_codigo)
+            ->first();
+
+        $horaEntrada = Carbon::createFromFormat('H:i', $request->hora_entrada);
+        $horarioConfigurado = [
+            'usuario_id' => $usuarioId,
+            'dia_codigo' => $request->dia_codigo,
+            'dia_nombre' => trim($diaInfo->diasem_nombre),
+            'hora_entrada' => $request->hora_entrada,
+            'hora_salida' => $request->hora_salida,
+            'jornada' => $horaEntrada->hour < 12 ? 'MATUTINA' : 'NOCTURNA',
+            'formato_visual' => "{$request->hora_entrada} - {$request->hora_salida}",
+            'observaciones' => $request->observaciones,
+            'validacion_oficina' => $validacionOficina,
+            'forzado' => $request->get('forzar_creacion', false)
+        ];
+
+        DB::commit();
+
+        Log::info("✅ Horario personalizado {$operacion} exitosamente:", [
+            'usuario_id' => $usuarioId,
+            'dia' => $diaInfo->diasem_nombre,
+            'horario' => "{$request->hora_entrada} - {$request->hora_salida}",
+            'validacion_oficina' => $validacionOficina['valido']
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Horario personalizado {$operacion} exitosamente para " . trim($diaInfo->diasem_nombre),
+            'data' => $horarioConfigurado
+        ], $horarioExistente ? 200 : 201);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error("❌ Error creando horario usuario: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error al crear horario: ' . $e->getMessage(),
+            'data' => null
+        ], 500);
     }
+}
 /**
      * Crear/actualizar múltiples horarios de una vez
      * POST /api/usuarios/{usuarioId}/horarios/batch

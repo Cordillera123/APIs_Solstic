@@ -39,7 +39,7 @@ use App\Http\Controllers\Api\LogAccesoController;
 // =====================================================
 
 // Autenticación
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->name('login');
 
 // ✅ LOGOS PÚBLICOS
 Route::prefix('logos')->group(function () {

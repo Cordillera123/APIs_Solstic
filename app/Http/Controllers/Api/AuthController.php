@@ -32,7 +32,7 @@ class AuthController extends Controller
 
         try {
             $usuario = Usuario::where('usu_cor', $request->email)->first();
-            
+
             if (!$usuario) {
                 Log::warning("🚫 Intento de login con email inexistente: {$request->email}", [
                     'ip' => $request->ip(),
@@ -42,7 +42,7 @@ class AuthController extends Controller
                     'message' => 'Credenciales inválidas'
                 ], 401);
             }
-            
+
             // Verificar que el usuario esté activo
             if ($usuario->est_id != 1) {
                 Log::warning("🚫 Login de usuario inactivo: {$usuario->usu_id} - {$usuario->usu_cor}");
@@ -50,7 +50,7 @@ class AuthController extends Controller
                     'message' => 'Usuario inactivo o suspendido'
                 ], 403);
             }
-            
+
             // Verificar que el usuario no esté deshabilitado
             if ($usuario->usu_deshabilitado === true) {
                 Log::warning("🚫 Login de usuario deshabilitado: {$usuario->usu_id} - {$usuario->usu_cor}");
@@ -61,7 +61,7 @@ class AuthController extends Controller
 
             // Verificar contraseña - Compatible con texto plano
             $passwordValid = false;
-            
+
             if ($request->password === $usuario->usu_con) {
                 $passwordValid = true;
             } else {
@@ -71,7 +71,7 @@ class AuthController extends Controller
                     $passwordValid = false;
                 }
             }
-            
+
             if (!$passwordValid) {
                 Log::warning("🚫 Contraseña incorrecta para usuario: {$usuario->usu_id} - {$usuario->usu_cor}");
                 return response()->json([
@@ -81,11 +81,11 @@ class AuthController extends Controller
 
             // ✅ NUEVA VALIDACIÓN DE HORARIOS
             $validacionHorario = $this->validarHorarioAcceso($usuario, $request);
-            
+
             if (!$validacionHorario['puede_acceder']) {
                 // Registrar intento fallido automáticamente
                 $this->registrarIntentoFallido($usuario, $validacionHorario, $request);
-                
+
                 return response()->json([
                     'message' => $validacionHorario['mensaje'],
                     'tipo_error' => $validacionHorario['tipo'],
@@ -102,7 +102,7 @@ class AuthController extends Controller
 
             // Crear token
             $token = $usuario->createToken('auth_token')->plainTextToken;
-            
+
             // Obtener información del usuario
             $userInfo = [
                 'id' => $usuario->usu_id,
@@ -114,13 +114,13 @@ class AuthController extends Controller
                 'oficina_codigo' => $usuario->oficin_codigo,
                 'es_super_admin' => $usuario->per_id == 3
             ];
-            
+
             // Obtener permisos del usuario
             $permisos = $this->getUserMenus($usuario->usu_id);
 
             // ✅ INCLUIR INFORMACIÓN DE HORARIO
             $infoHorario = $this->getInfoHorarioUsuario($usuario);
-            
+
             Log::info("✅ Login exitoso: {$usuario->usu_id} - {$usuario->usu_cor}", [
                 'oficina' => $usuario->oficin_codigo,
                 'perfil' => $usuario->per_id,
@@ -135,7 +135,6 @@ class AuthController extends Controller
                 'access_token' => $token,
                 'token_type' => 'Bearer',
             ]);
-
         } catch (\Exception $e) {
             Log::error("❌ Error en login: " . $e->getMessage(), [
                 'email' => $request->email,
@@ -200,12 +199,53 @@ class AuthController extends Controller
             ];
         }
 
-        $now = Carbon::now('America/Guayaquil'); // Usar la zona horaria configurada
+        $now = Carbon::now('America/Guayaquil');
         $diaSemana = $now->dayOfWeekIso; // 1=Lunes, 7=Domingo
         $horaActual = $now->format('H:i:s');
 
-        // Obtener horario para el día actual
-        $horario = DB::table('gaf_jorofi')
+        // ✅ NUEVA LÓGICA: Verificar HORARIOS INDIVIDUALES PRIMERO
+
+        // 🥇 PRIORIDAD 1: Horarios temporales activos
+        $horarioTemporal = DB::table('gaf_jorusu_temp')
+            ->where('temp_usu_id', $usuario->usu_id)
+            ->where('temp_diasem_codigo', $diaSemana)
+            ->where('temp_fecha_inicio', '<=', $now->format('Y-m-d'))
+            ->where('temp_fecha_fin', '>=', $now->format('Y-m-d'))
+            ->where('temp_activo', true)
+            ->first();
+
+        if ($horarioTemporal) {
+            Log::info("🕐 Usando horario temporal para usuario: {$usuario->usu_id}");
+            return $this->validarHorarioEspecifico(
+                $horarioTemporal->temp_horentrada,
+                $horarioTemporal->temp_horsalida,
+                $horaActual,
+                'TEMPORAL',
+                $usuario,
+                $diaSemana
+            );
+        }
+
+        // 🥈 PRIORIDAD 2: Horarios personalizados permanentes
+        $horarioPersonalizado = DB::table('gaf_jorusu')
+            ->where('jorusu_usu_id', $usuario->usu_id)
+            ->where('jorusu_diasem_codigo', $diaSemana)
+            ->first();
+
+        if ($horarioPersonalizado) {
+            Log::info("🕐 Usando horario personalizado para usuario: {$usuario->usu_id}");
+            return $this->validarHorarioEspecifico(
+                $horarioPersonalizado->jorusu_horentrada,
+                $horarioPersonalizado->jorusu_horsalida,
+                $horaActual,
+                'PERSONALIZADO',
+                $usuario,
+                $diaSemana
+            );
+        }
+
+        // 🥉 PRIORIDAD 3: Horario de oficina (heredado)
+        $horarioOficina = DB::table('gaf_jorofi')
             ->leftJoin('gaf_diasem', 'gaf_jorofi.jorofi_diasem_codigo', '=', 'gaf_diasem.diasem_codigo')
             ->where('gaf_jorofi.jorofi_oficin_codigo', $usuario->oficin_codigo)
             ->where('gaf_jorofi.jorofi_diasem_codigo', $diaSemana)
@@ -216,7 +256,7 @@ class AuthController extends Controller
             )
             ->first();
 
-        if (!$horario) {
+        if (!$horarioOficina) {
             Log::warning("🚫 Sin horario configurado: oficina {$usuario->oficin_codigo}, día {$diaSemana}");
             return [
                 'puede_acceder' => false,
@@ -231,57 +271,76 @@ class AuthController extends Controller
             ];
         }
 
-        // Validar si está dentro del horario
-        $horaInicio = Carbon::createFromFormat('H:i:s', $horario->jorofi_horinicial);
-        $horaFin = Carbon::createFromFormat('H:i:s', $horario->jorofi_horfinal);
-        $horaConsulta = Carbon::createFromFormat('H:i:s', $horaActual);
+        Log::info("🕐 Usando horario de oficina para usuario: {$usuario->usu_id}");
+        return $this->validarHorarioEspecifico(
+            $horarioOficina->jorofi_horinicial,
+            $horarioOficina->jorofi_horfinal,
+            $horaActual,
+            'HEREDADO_OFICINA',
+            $usuario,
+            $diaSemana,
+            $horarioOficina
+        );
+    }
+
+    /**
+     * ✅ NUEVO: Función auxiliar para validar horario específico
+     */
+    private function validarHorarioEspecifico($horaInicio, $horaFin, $horaActual, $tipo, $usuario, $diaSemana, $horarioData = null)
+    {
+        $horaInicioCarbon = Carbon::createFromFormat('H:i:s', $horaInicio);
+        $horaFinCarbon = Carbon::createFromFormat('H:i:s', $horaFin);
+        $horaConsultaCarbon = Carbon::createFromFormat('H:i:s', $horaActual);
 
         $dentroDelHorario = false;
-        $cruzaMedianoche = $horaFin < $horaInicio;
+        $cruzaMedianoche = $horaFinCarbon < $horaInicioCarbon;
 
         if ($cruzaMedianoche) {
             // Horario nocturno que cruza medianoche
-            $dentroDelHorario = $horaConsulta >= $horaInicio || $horaConsulta <= $horaFin;
+            $dentroDelHorario = $horaConsultaCarbon >= $horaInicioCarbon || $horaConsultaCarbon <= $horaFinCarbon;
         } else {
             // Horario normal
-            $dentroDelHorario = $horaConsulta >= $horaInicio && $horaConsulta <= $horaFin;
+            $dentroDelHorario = $horaConsultaCarbon >= $horaInicioCarbon && $horaConsultaCarbon <= $horaFinCarbon;
         }
 
         if (!$dentroDelHorario) {
-            Log::warning("🚫 Fuera de horario: usuario {$usuario->usu_id}, oficina {$usuario->oficin_codigo}");
+            Log::warning("🚫 Fuera de horario {$tipo}: usuario {$usuario->usu_id}");
             return [
                 'puede_acceder' => false,
                 'tipo' => 'FUERA_HORARIO',
-                'mensaje' => 'Fuera del horario permitido. Horario: ' . $horario->jorofi_horinicial . ' - ' . $horario->jorofi_horfinal,
+                'mensaje' => "Fuera del horario permitido ({$tipo}). Horario: {$horaInicio} - {$horaFin}",
                 'detalles' => [
+                    'origen_horario' => $tipo,
                     'oficina_codigo' => $usuario->oficin_codigo,
-                    'dia_actual' => trim($horario->diasem_nombre),
+                    'dia_actual' => $horarioData ? trim($horarioData->diasem_nombre) : $diaSemana,
                     'hora_actual' => $horaActual,
-                    'horario_inicio' => $horario->jorofi_horinicial,
-                    'horario_fin' => $horario->jorofi_horfinal,
+                    'horario_inicio' => $horaInicio,
+                    'horario_fin' => $horaFin,
                     'cruza_medianoche' => $cruzaMedianoche,
-                    'jornada' => $horaInicio->hour < 12 ? 'MATUTINA' : 'NOCTURNA'
+                    'jornada' => $horaInicioCarbon->hour < 12 ? 'MATUTINA' : 'NOCTURNA'
                 ]
             ];
         }
 
         // ✅ ACCESO PERMITIDO
-        Log::info("✅ Acceso dentro de horario: usuario {$usuario->usu_id}, oficina {$usuario->oficin_codigo}");
+        Log::info("✅ Acceso dentro de horario {$tipo}: usuario {$usuario->usu_id}");
         return [
             'puede_acceder' => true,
             'tipo' => 'DENTRO_HORARIO',
-            'mensaje' => 'Acceso permitido',
+            'mensaje' => "Acceso permitido ({$tipo})",
             'detalles' => [
+                'origen_horario' => $tipo,
                 'oficina_codigo' => $usuario->oficin_codigo,
-                'dia_actual' => trim($horario->diasem_nombre),
+                'dia_actual' => $horarioData ? trim($horarioData->diasem_nombre) : $diaSemana,
                 'hora_actual' => $horaActual,
-                'horario_inicio' => $horario->jorofi_horinicial,
-                'horario_fin' => $horario->jorofi_horfinal,
+                'horario_inicio' => $horaInicio,
+                'horario_fin' => $horaFin,
                 'cruza_medianoche' => $cruzaMedianoche,
-                'jornada' => $horaInicio->hour < 12 ? 'MATUTINA' : 'NOCTURNA'
+                'jornada' => $horaInicioCarbon->hour < 12 ? 'MATUTINA' : 'NOCTURNA'
             ]
         ];
     }
+
 
     /**
      * ✅ NUEVO: Registrar intento fallido automáticamente
@@ -290,7 +349,7 @@ class AuthController extends Controller
     {
         try {
             $now = Carbon::now('America/Guayaquil'); // Usar la zona horaria configurada
-            
+
             $logData = [
                 'logacc_usu_id' => $usuario->usu_id,
                 'logacc_oficin_codigo' => $usuario->oficin_codigo ?: 0,
@@ -317,7 +376,6 @@ class AuthController extends Controller
                 'tipo' => $validacionHorario['tipo'],
                 'oficina' => $usuario->oficin_codigo
             ]);
-
         } catch (\Exception $e) {
             Log::error("❌ Error registrando intento fallido: " . $e->getMessage());
         }
@@ -346,11 +404,53 @@ class AuthController extends Controller
             ];
         }
 
-        $now = Carbon::now('America/Guayaquil'); // Usar la zona horaria configurada
+        $now = Carbon::now('America/Guayaquil');
         $diaSemana = $now->dayOfWeekIso;
 
-        // Obtener horario actual
-        $horario = DB::table('gaf_jorofi')
+        // ✅ MISMA LÓGICA DE PRIORIDAD QUE EN validarHorarioAcceso
+
+        // 🥇 PRIORIDAD 1: Horarios temporales
+        $horarioTemporal = DB::table('gaf_jorusu_temp')
+            ->where('temp_usu_id', $usuario->usu_id)
+            ->where('temp_diasem_codigo', $diaSemana)
+            ->where('temp_fecha_inicio', '<=', $now->format('Y-m-d'))
+            ->where('temp_fecha_fin', '>=', $now->format('Y-m-d'))
+            ->where('temp_activo', true)
+            ->first();
+
+        if ($horarioTemporal) {
+            return $this->calcularInfoHorario(
+                $horarioTemporal->temp_horentrada,
+                $horarioTemporal->temp_horsalida,
+                $now,
+                'TEMPORAL',
+                $usuario,
+                [
+                    'motivo' => $horarioTemporal->temp_motivo,
+                    'tipo' => $horarioTemporal->temp_tipo,
+                    'fecha_fin' => $horarioTemporal->temp_fecha_fin
+                ]
+            );
+        }
+
+        // 🥈 PRIORIDAD 2: Horarios personalizados
+        $horarioPersonalizado = DB::table('gaf_jorusu')
+            ->where('jorusu_usu_id', $usuario->usu_id)
+            ->where('jorusu_diasem_codigo', $diaSemana)
+            ->first();
+
+        if ($horarioPersonalizado) {
+            return $this->calcularInfoHorario(
+                $horarioPersonalizado->jorusu_horentrada,
+                $horarioPersonalizado->jorusu_horsalida,
+                $now,
+                'PERSONALIZADO',
+                $usuario
+            );
+        }
+
+        // 🥉 PRIORIDAD 3: Horario de oficina
+        $horarioOficina = DB::table('gaf_jorofi')
             ->leftJoin('gaf_diasem', 'gaf_jorofi.jorofi_diasem_codigo', '=', 'gaf_diasem.diasem_codigo')
             ->where('gaf_jorofi.jorofi_oficin_codigo', $usuario->oficin_codigo)
             ->where('gaf_jorofi.jorofi_diasem_codigo', $diaSemana)
@@ -361,7 +461,7 @@ class AuthController extends Controller
             )
             ->first();
 
-        if (!$horario) {
+        if (!$horarioOficina) {
             return [
                 'es_super_admin' => false,
                 'tiene_restricciones' => true,
@@ -372,25 +472,36 @@ class AuthController extends Controller
             ];
         }
 
-        // Calcular tiempo restante hasta el cierre
+        return $this->calcularInfoHorario(
+            $horarioOficina->jorofi_horinicial,
+            $horarioOficina->jorofi_horfinal,
+            $now,
+            'HEREDADO_OFICINA',
+            $usuario,
+            ['dia_nombre' => trim($horarioOficina->diasem_nombre)]
+        );
+    }
+
+    private function calcularInfoHorario($horaInicio, $horaFin, $now, $origen, $usuario, $extras = [])
+    {
         $horaActual = Carbon::createFromFormat('H:i', $now->format('H:i'));
-        $horaFin = Carbon::createFromFormat('H:i:s', $horario->jorofi_horfinal);
-        $horaInicio = Carbon::createFromFormat('H:i:s', $horario->jorofi_horinicial);
-        
+        $horaFinCarbon = Carbon::createFromFormat('H:i:s', $horaFin);
+        $horaInicioCarbon = Carbon::createFromFormat('H:i:s', $horaInicio);
+
         $tiempoRestante = null;
         $alertaCierre = false;
-        
-        if ($horaFin < $horaInicio) {
+
+        if ($horaFinCarbon < $horaInicioCarbon) {
             // Horario nocturno
-            if ($horaActual >= $horaInicio) {
-                $tiempoRestante = $horaActual->diffInMinutes($horaFin->addDay());
+            if ($horaActual >= $horaInicioCarbon) {
+                $tiempoRestante = $horaActual->diffInMinutes($horaFinCarbon->addDay());
             } else {
-                $tiempoRestante = $horaActual->diffInMinutes($horaFin);
+                $tiempoRestante = $horaActual->diffInMinutes($horaFinCarbon);
             }
         } else {
             // Horario normal
-            if ($horaActual <= $horaFin) {
-                $tiempoRestante = $horaActual->diffInMinutes($horaFin);
+            if ($horaActual <= $horaFinCarbon) {
+                $tiempoRestante = $horaActual->diffInMinutes($horaFinCarbon);
             }
         }
 
@@ -399,34 +510,46 @@ class AuthController extends Controller
             $alertaCierre = true;
         }
 
-        return [
+        $baseInfo = [
             'es_super_admin' => false,
             'tiene_restricciones' => true,
             'tiene_oficina' => true,
             'tiene_horario_hoy' => true,
             'oficina_codigo' => $usuario->oficin_codigo,
-            'dia_actual' => trim($horario->diasem_nombre),
+            'origen_horario' => $origen,
+            'dia_actual' => $extras['dia_nombre'] ?? $now->dayOfWeekIso,
             'horario' => [
-                'inicio' => $horario->jorofi_horinicial,
-                'fin' => $horario->jorofi_horfinal,
-                'formato_visual' => $horario->jorofi_horinicial . ' - ' . $horario->jorofi_horfinal
+                'inicio' => $horaInicio,
+                'fin' => $horaFin,
+                'formato_visual' => $horaInicio . ' - ' . $horaFin
             ],
             'tiempo_restante_minutos' => $tiempoRestante,
             'alerta_cierre_proximo' => $alertaCierre,
-            'mensaje' => $alertaCierre ? 
-                'Su sesión se cerrará en ' . $tiempoRestante . ' minuto(s)' : 
-                'Dentro del horario permitido'
+            'mensaje' => $alertaCierre ?
+                "Su sesión se cerrará en {$tiempoRestante} minuto(s) ({$origen})" :
+                "Dentro del horario permitido ({$origen})"
         ];
-    }
 
+        // Agregar información extra según el tipo de horario
+        if ($origen === 'TEMPORAL' && isset($extras['motivo'])) {
+            $baseInfo['info_temporal'] = [
+                'motivo' => $extras['motivo'],
+                'tipo' => $extras['tipo'],
+                'fecha_fin' => $extras['fecha_fin']
+            ];
+        }
+
+        return $baseInfo;
+    }
     /**
      * ✅ NUEVO: Verificar horario de usuario activo (para middleware)
      */
+    
     public function verificarHorarioActivo(Request $request)
     {
         try {
             $user = $request->user();
-            
+
             if (!$user) {
                 return response()->json([
                     'status' => 'error',
@@ -437,7 +560,7 @@ class AuthController extends Controller
 
             // Obtener usuario completo
             $usuario = Usuario::find($user->usu_id);
-            
+
             if (!$usuario || $usuario->usu_deshabilitado === true) {
                 return response()->json([
                     'status' => 'error',
@@ -449,11 +572,11 @@ class AuthController extends Controller
 
             // Validar horario actual
             $validacionHorario = $this->validarHorarioAcceso($usuario, $request);
-            
+
             if (!$validacionHorario['puede_acceder']) {
                 // Registrar que se cerró por horario
                 Log::info("🕐 Cerrando sesión por horario: {$usuario->usu_id} - {$validacionHorario['tipo']}");
-                
+
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Su horario de acceso ha finalizado',
@@ -472,7 +595,6 @@ class AuthController extends Controller
                 'horario_info' => $infoHorario,
                 'debe_cerrar_sesion' => false
             ]);
-
         } catch (\Exception $e) {
             Log::error("❌ Error verificando horario activo: " . $e->getMessage());
             return response()->json([
@@ -482,7 +604,45 @@ class AuthController extends Controller
             ], 500);
         }
     }
+    public function getMiHorarioActual(Request $request)
+{
+    try {
+        $user = $request->user();
 
+        if (!$user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no autenticado'
+            ], 401);
+        }
+
+        // Obtener usuario completo
+        $usuario = Usuario::find($user->usu_id);
+
+        if (!$usuario || $usuario->usu_deshabilitado === true) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario no válido'
+            ], 403);
+        }
+
+        // Obtener información actualizada de horario
+        $infoHorario = $this->getInfoHorarioUsuario($usuario);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Horario actual obtenido correctamente',
+            'data' => $infoHorario
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error("❌ Error obteniendo mi horario actual: " . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error interno del servidor'
+        ], 500);
+    }
+}
     /**
      * Logout de usuario (Revocar token)
      */
@@ -490,12 +650,12 @@ class AuthController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             if ($user) {
                 Log::info("👋 Logout usuario: {$user->usu_id}");
                 $request->user()->currentAccessToken()->delete();
             }
-            
+
             return response()->json([
                 'message' => 'Sesión cerrada exitosamente'
             ]);
@@ -506,7 +666,7 @@ class AuthController extends Controller
             ]);
         }
     }
-    
+
     /**
      * Obtener información del usuario autenticado
      */
@@ -514,7 +674,7 @@ class AuthController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             if (!$user) {
                 return response()->json([
                     'status' => 'error',
@@ -523,7 +683,7 @@ class AuthController extends Controller
             }
 
             $usuarioActual = Usuario::find($user->usu_id);
-            
+
             if (!$usuarioActual || $usuarioActual->usu_deshabilitado === true) {
                 return response()->json([
                     'message' => 'Su sesión ha sido revocada por el administrador',
@@ -543,20 +703,19 @@ class AuthController extends Controller
                 )
                 ->where('tbl_usu.usu_id', $user->usu_id)
                 ->first();
-            
+
             // Obtener permisos del usuario
             $permisos = $this->getUserMenus($user->usu_id);
-            
+
             // Obtener información de horario actualizada
             $infoHorario = $this->getInfoHorarioUsuario($usuarioActual);
-            
+
             return response()->json([
                 'status' => 'success',
                 'user' => $userInfo,
                 'permisos' => $permisos,
                 'horario_info' => $infoHorario
             ]);
-
         } catch (\Exception $e) {
             Log::error("❌ Error obteniendo usuario: " . $e->getMessage());
             return response()->json([
@@ -567,14 +726,14 @@ class AuthController extends Controller
     }
 
     // ... [Resto de métodos getUserMenus, etc. - mantener los existentes]
-    
+
     /**
      * Obtener menús y permisos del usuario incluyendo iconos
      */
     public function getUserMenus($userId)
     {
         error_log('DEBUG 1 - Iniciando getUserMenus para usuario: ' . $userId);
-        
+
         // Obtener el perfil del usuario
         $usuario = DB::table('tbl_usu')
             ->join('tbl_per', 'tbl_usu.per_id', '=', 'tbl_per.per_id')
@@ -582,23 +741,23 @@ class AuthController extends Controller
             ->where('tbl_usu.usu_id', $userId)
             ->where('tbl_usu.usu_deshabilitado', '!=', true)
             ->first();
-        
+
         error_log('DEBUG 1 - Usuario encontrado: ' . json_encode($usuario));
-        
+
         if (!$usuario) {
             error_log('ERROR - Usuario no encontrado con ID: ' . $userId);
             return [];
         }
-        
+
         // Verificar si el usuario tiene permisos individuales asignados
         $permisosIndividuales = DB::table('tbl_usu_perm')
             ->where('usu_id', $userId)
             ->get();
-        
+
         error_log('DEBUG 2 - Permisos individuales count: ' . $permisosIndividuales->count());
-        
+
         $tienePermisosIndividuales = $permisosIndividuales->count() > 0;
-        
+
         if ($tienePermisosIndividuales) {
             // CASO 1: Usuario tiene permisos individuales - mostrar SOLO esos
             error_log('DEBUG 3 - Usuario TIENE permisos individuales, usando lógica INDIVIDUAL');
@@ -610,10 +769,10 @@ class AuthController extends Controller
             // NUEVA LÓGICA: En lugar de mostrar todos del perfil, mostrar array vacío
             // Esto fuerza a que primero se asignen permisos individuales
             error_log('DEBUG 5 - Usuario NO tiene permisos individuales, retornando VACÍO');
-            
+
             // OPCIÓN A: Retornar vacío (recomendado para tu caso)
             return [];
-            
+
             // OPCIÓN B: Si quieres que muestre todos los del perfil cuando no tiene individuales
             // descomenta la siguiente línea y comenta el return [] de arriba:
             // return $this->getProfileMenus($usuario->per_id);
@@ -623,15 +782,15 @@ class AuthController extends Controller
     private function getUserIndividualMenus($userId, $perfilId)
     {
         error_log('INDIVIDUAL DEBUG - Iniciando con userId: ' . $userId);
-        
+
         // Obtener SOLO los permisos específicos del usuario
         $permisosUsuario = DB::table('tbl_usu_perm')
             ->where('usu_id', $userId)
             ->get();
-        
+
         error_log('INDIVIDUAL DEBUG - Permisos usuario count: ' . $permisosUsuario->count());
         error_log('INDIVIDUAL DEBUG - Permisos usuario data: ' . json_encode($permisosUsuario->toArray()));
-        
+
         if ($permisosUsuario->isEmpty()) {
             error_log('INDIVIDUAL DEBUG - No hay permisos individuales, retornando vacío');
             return [];
@@ -643,13 +802,13 @@ class AuthController extends Controller
             $key = $permiso->men_id . '-' . ($permiso->sub_id ?: 'null') . '-' . ($permiso->opc_id ?: 'null');
             $permisosMap[$key] = true;
         }
-        
+
         error_log('INDIVIDUAL DEBUG - Mapa de permisos: ' . json_encode(array_keys($permisosMap)));
 
         // Obtener menús únicos de los permisos del usuario
         $menusIds = $permisosUsuario->pluck('men_id')->unique()->values();
         error_log('INDIVIDUAL DEBUG - IDs de menús a procesar: ' . json_encode($menusIds->toArray()));
-        
+
         // Obtener información de los menús CON COMPONENTES
         $menus = DB::table('tbl_men')
             ->leftJoin('tbl_ico', 'tbl_men.ico_id', '=', 'tbl_ico.ico_id')
@@ -673,13 +832,13 @@ class AuthController extends Controller
 
         foreach ($menus as $menu) {
             error_log('INDIVIDUAL DEBUG - Procesando menú: ' . $menu->id . ' - ' . $menu->nombre . ' - Componente: ' . $menu->componente);
-            
+
             $menuKey = $menu->id . '-null-null';
-            
+
             // Solo incluir menús que el usuario tiene asignados individualmente
             if (isset($permisosMap[$menuKey])) {
                 error_log('INDIVIDUAL DEBUG - Menú ' . $menu->id . ' tiene permiso directo');
-                
+
                 // Obtener submenús que el usuario tiene asignados individualmente para este menú
                 $submenusIdsUsuario = $permisosUsuario
                     ->where('men_id', $menu->id)
@@ -687,11 +846,11 @@ class AuthController extends Controller
                     ->pluck('sub_id')
                     ->unique()
                     ->values();
-                
+
                 error_log('INDIVIDUAL DEBUG - Submenús IDs para menú ' . $menu->id . ': ' . json_encode($submenusIdsUsuario->toArray()));
-                
+
                 $submenusPermitidos = [];
-                
+
                 if ($submenusIdsUsuario->isNotEmpty()) {
                     // Obtener información de los submenús CON COMPONENTES
                     $submenus = DB::table('tbl_sub')
@@ -712,11 +871,11 @@ class AuthController extends Controller
 
                     foreach ($submenus as $submenu) {
                         $submenuKey = $menu->id . '-' . $submenu->id . '-null';
-                        
+
                         // Solo incluir submenús que el usuario tiene asignados individualmente
                         if (isset($permisosMap[$submenuKey])) {
                             error_log('INDIVIDUAL DEBUG - Submenú ' . $submenu->id . ' tiene permiso - Componente: ' . $submenu->componente);
-                            
+
                             // Obtener opciones que el usuario tiene asignadas individualmente para este submenú
                             $opcionesIdsUsuario = $permisosUsuario
                                 ->where('men_id', $menu->id)
@@ -725,11 +884,11 @@ class AuthController extends Controller
                                 ->pluck('opc_id')
                                 ->unique()
                                 ->values();
-                            
+
                             error_log('INDIVIDUAL DEBUG - Opciones IDs para submenú ' . $submenu->id . ': ' . json_encode($opcionesIdsUsuario->toArray()));
-                            
+
                             $opciones = [];
-                            
+
                             if ($opcionesIdsUsuario->isNotEmpty()) {
                                 $opciones = DB::table('tbl_opc')
                                     ->leftJoin('tbl_ico', 'tbl_opc.ico_id', '=', 'tbl_ico.ico_id')
@@ -748,24 +907,24 @@ class AuthController extends Controller
                                     ->get()
                                     ->toArray();
                             }
-                            
+
                             $submenu->opciones = $opciones;
                             $submenusPermitidos[] = $submenu;
                         }
                     }
                 }
-                
+
                 $menu->submenus = $submenusPermitidos;
                 $menusPermitidos[] = $menu;
-                
+
                 error_log('INDIVIDUAL DEBUG - Menú ' . $menu->id . ' agregado con ' . count($submenusPermitidos) . ' submenús');
             } else {
                 error_log('INDIVIDUAL DEBUG - Menú ' . $menu->id . ' NO tiene permiso directo, saltando');
             }
         }
-        
+
         error_log('INDIVIDUAL DEBUG - Total menús finales: ' . count($menusPermitidos));
-        
+
         return $menusPermitidos;
     }
 
@@ -791,14 +950,14 @@ class AuthController extends Controller
             ->groupBy('tbl_men.men_id', 'tbl_men.men_nom', 'tbl_men.men_componente', 'tbl_men.men_ventana_directa', 'tbl_men.men_url', 'tbl_ico.ico_nom', 'tbl_ico.ico_lib')
             ->orderBy('tbl_men.men_id')
             ->get();
-        
+
         // Para cada menú, obtener sus submenús
         foreach ($menus as $menu) {
             $submenus = DB::table('tbl_sub')
                 ->join('tbl_men_sub', 'tbl_sub.sub_id', '=', 'tbl_men_sub.sub_id')
                 ->join('tbl_perm', function ($join) use ($perfilId) {
                     $join->on('tbl_sub.sub_id', '=', 'tbl_perm.sub_id')
-                         ->where('tbl_perm.per_id', '=', $perfilId);
+                        ->where('tbl_perm.per_id', '=', $perfilId);
                 })
                 ->leftJoin('tbl_ico', 'tbl_sub.ico_id', '=', 'tbl_ico.ico_id')
                 ->select(
@@ -816,16 +975,16 @@ class AuthController extends Controller
                 ->groupBy('tbl_sub.sub_id', 'tbl_sub.sub_nom', 'tbl_sub.sub_componente', 'tbl_sub.sub_ventana_directa', 'tbl_sub.sub_url', 'tbl_ico.ico_nom', 'tbl_ico.ico_lib')
                 ->orderBy('tbl_sub.sub_id')
                 ->get();
-            
+
             // Para cada submenú, obtener sus opciones
             foreach ($submenus as $submenu) {
                 $opciones = DB::table('tbl_opc')
                     ->join('tbl_sub_opc', 'tbl_opc.opc_id', '=', 'tbl_sub_opc.opc_id')
                     ->join('tbl_perm', function ($join) use ($perfilId, $menu, $submenu) {
                         $join->on('tbl_opc.opc_id', '=', 'tbl_perm.opc_id')
-                             ->where('tbl_perm.per_id', '=', $perfilId)
-                             ->where('tbl_perm.men_id', '=', $menu->id)
-                             ->where('tbl_perm.sub_id', '=', $submenu->id);
+                            ->where('tbl_perm.per_id', '=', $perfilId)
+                            ->where('tbl_perm.men_id', '=', $menu->id)
+                            ->where('tbl_perm.sub_id', '=', $submenu->id);
                     })
                     ->leftJoin('tbl_ico', 'tbl_opc.ico_id', '=', 'tbl_ico.ico_id')
                     ->select(
@@ -842,13 +1001,13 @@ class AuthController extends Controller
                     ->groupBy('tbl_opc.opc_id', 'tbl_opc.opc_nom', 'tbl_opc.opc_componente', 'tbl_opc.opc_ventana_directa', 'tbl_opc.opc_url', 'tbl_ico.ico_nom', 'tbl_ico.ico_lib')
                     ->orderBy('tbl_opc.opc_id')
                     ->get();
-                
+
                 $submenu->opciones = $opciones;
             }
-            
+
             $menu->submenus = $submenus;
         }
-        
+
         return $menus;
     }
 
@@ -859,7 +1018,7 @@ class AuthController extends Controller
         if (!$usuario) {
             return false;
         }
-        
+
         // Verificar que el permiso esté disponible en el perfil
         $perfilHasPermission = DB::table('tbl_perm')
             ->where('per_id', $usuario->per_id)
@@ -867,11 +1026,11 @@ class AuthController extends Controller
             ->where('sub_id', $submenuId)
             ->where('opc_id', $opcionId)
             ->exists();
-        
+
         if (!$perfilHasPermission) {
             return false;
         }
-        
+
         // Verificar que el usuario tenga el permiso específico asignado
         return DB::table('tbl_usu_perm')
             ->where('usu_id', $userId)
